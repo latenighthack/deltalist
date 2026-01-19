@@ -3,6 +3,7 @@ package com.latenighthack.deltalist.demo
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,7 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -22,10 +22,17 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.DeltaFlow
-import com.latenighthack.deltalist.android.DeltaAdapter
+import com.latenighthack.deltalist.LazyAccess
+import com.latenighthack.deltalist.Mutation
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
 @Composable
 fun RecyclerViewScreen(viewModel: DemoViewModel) {
@@ -58,7 +65,7 @@ fun RecyclerViewScreen(viewModel: DemoViewModel) {
                 factory = { context ->
                     RecyclerView(context).apply {
                         layoutManager = LinearLayoutManager(context)
-                        adapter = ItemAdapter(viewModel.items) { index ->
+                        adapter = TickingItemAdapter(viewModel.tickingItems) { index ->
                             selectedIndex = if (selectedIndex == index) -1 else index
                         }.also { adapter ->
                             adapter.bind(lifecycleOwner)
@@ -66,7 +73,7 @@ fun RecyclerViewScreen(viewModel: DemoViewModel) {
                     }
                 },
                 update = { recyclerView ->
-                    (recyclerView.adapter as? ItemAdapter)?.selectedIndex = selectedIndex
+                    (recyclerView.adapter as? TickingItemAdapter)?.selectedIndex = selectedIndex
                 }
             )
         }
@@ -116,10 +123,20 @@ private fun ControlButtons(
     }
 }
 
-private class ItemAdapter(
-    deltaFlow: DeltaFlow<Item>,
+/**
+ * RecyclerView adapter that demonstrates LazyAccess lifecycle management.
+ * - Acquires TickingItems when views are attached (visible)
+ * - Releases them when views are detached (scrolled out)
+ * - Observes tick count and updates the view
+ */
+private class TickingItemAdapter(
+    private val deltaFlow: DeltaFlow<LazyAccess<TickingItem>>,
     private val onItemClick: (Int) -> Unit
-) : DeltaAdapter<Item, ItemAdapter.ItemViewHolder>(deltaFlow) {
+) : RecyclerView.Adapter<TickingItemAdapter.TickingItemViewHolder>() {
+
+    private var items: List<LazyAccess<TickingItem>> = emptyList()
+    private var collectionJob: Job? = null
+    private var lifecycleOwner: LifecycleOwner? = null
 
     var selectedIndex: Int = -1
         set(value) {
@@ -129,27 +146,163 @@ private class ItemAdapter(
             if (value >= 0) notifyItemChanged(value)
         }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ItemViewHolder {
-        val view = LayoutInflater.from(parent.context)
-            .inflate(android.R.layout.simple_list_item_1, parent, false)
-        return ItemViewHolder(view)
+    fun bind(owner: LifecycleOwner) {
+        lifecycleOwner = owner
+        collectionJob?.cancel()
+        collectionJob = owner.lifecycleScope.launch {
+            deltaFlow.collect { delta -> applyDelta(delta) }
+        }
     }
 
-    override fun onBindViewHolder(holder: ItemViewHolder, position: Int) {
-        val item = getItem(position)
-        holder.bind(item, position == selectedIndex, onItemClick)
+    fun unbind() {
+        collectionJob?.cancel()
+        collectionJob = null
+        lifecycleOwner = null
     }
 
-    class ItemViewHolder(view: View) : RecyclerView.ViewHolder(view) {
-        private val textView: TextView = view.findViewById(android.R.id.text1)
+    private fun applyDelta(delta: com.latenighthack.deltalist.Delta<LazyAccess<TickingItem>>) {
+        items = delta.items
+        when (val change = delta.change) {
+            is Change.Reload -> notifyDataSetChanged()
+            is Change.Mutations -> {
+                change.operations.forEach { mutation ->
+                    when (mutation) {
+                        is Mutation.Insert -> notifyItemRangeInserted(mutation.index, mutation.count)
+                        is Mutation.Remove -> notifyItemRangeRemoved(mutation.index, mutation.count)
+                        is Mutation.Update -> notifyItemRangeChanged(mutation.index, mutation.count)
+                        is Mutation.Move -> {
+                            repeat(mutation.count) { i ->
+                                notifyItemMoved(mutation.fromIndex + i, mutation.toIndex + i)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
-        fun bind(item: Item, isSelected: Boolean, onClick: (Int) -> Unit) {
-            textView.text = item.title
-            itemView.isActivated = isSelected
-            itemView.setBackgroundColor(
-                if (isSelected) 0x330000FF else 0x00000000
+    override fun getItemCount(): Int = items.size
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): TickingItemViewHolder {
+        val layout = LinearLayout(parent.context).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
             )
+            setPadding(48, 24, 48, 24)
+        }
+        val titleView = TextView(parent.context).apply {
+            textSize = 16f
+        }
+        val tickView = TextView(parent.context).apply {
+            textSize = 12f
+            setTextColor(0xFF888888.toInt())
+        }
+        layout.addView(titleView)
+        layout.addView(tickView)
+        return TickingItemViewHolder(layout, titleView, tickView)
+    }
+
+    override fun onBindViewHolder(holder: TickingItemViewHolder, position: Int) {
+        val lazyAccess = items[position]
+        holder.bind(lazyAccess, position == selectedIndex, onItemClick, lifecycleOwner)
+    }
+
+    override fun onViewAttachedToWindow(holder: TickingItemViewHolder) {
+        super.onViewAttachedToWindow(holder)
+        holder.onAttached()
+    }
+
+    override fun onViewDetachedFromWindow(holder: TickingItemViewHolder) {
+        super.onViewDetachedFromWindow(holder)
+        holder.onDetached()
+    }
+
+    override fun onViewRecycled(holder: TickingItemViewHolder) {
+        super.onViewRecycled(holder)
+        holder.onRecycled()
+    }
+
+    class TickingItemViewHolder(
+        view: View,
+        private val titleView: TextView,
+        private val tickView: TextView
+    ) : RecyclerView.ViewHolder(view) {
+
+        private var currentLazyAccess: LazyAccess<TickingItem>? = null
+        private var currentTickingItem: TickingItem? = null
+        private var tickObserverJob: Job? = null
+        private var lifecycleOwner: LifecycleOwner? = null
+
+        fun bind(
+            lazyAccess: LazyAccess<TickingItem>,
+            isSelected: Boolean,
+            onClick: (Int) -> Unit,
+            owner: LifecycleOwner?
+        ) {
+            // Clean up previous item if different
+            if (currentLazyAccess !== lazyAccess) {
+                releaseCurrentItem()
+            }
+
+            currentLazyAccess = lazyAccess
+            lifecycleOwner = owner
+
+            // Acquire and display the item
+            val tickingItem = lazyAccess.getOrAcquire()
+            currentTickingItem = tickingItem
+
+            titleView.text = tickingItem.item.title
+            tickView.text = "Ticks: ${tickingItem.tickCount.value} (resets when scrolled out)"
+
+            itemView.isActivated = isSelected
+            itemView.setBackgroundColor(if (isSelected) 0x330000FF else 0x00000000)
             itemView.setOnClickListener { onClick(bindingAdapterPosition) }
+
+            // Start observing tick count
+            startObservingTicks(tickingItem, owner)
+        }
+
+        private fun startObservingTicks(tickingItem: TickingItem, owner: LifecycleOwner?) {
+            tickObserverJob?.cancel()
+            tickObserverJob = owner?.lifecycleScope?.launch {
+                tickingItem.tickCount.collectLatest { count ->
+                    tickView.text = "Ticks: $count (resets when scrolled out)"
+                }
+            }
+        }
+
+        fun onAttached() {
+            // Item is now visible - ensure it's acquired and observing
+            currentLazyAccess?.let { lazyAccess ->
+                if (currentTickingItem == null) {
+                    val tickingItem = lazyAccess.getOrAcquire()
+                    currentTickingItem = tickingItem
+                    titleView.text = tickingItem.item.title
+                    startObservingTicks(tickingItem, lifecycleOwner)
+                }
+            }
+        }
+
+        fun onDetached() {
+            // Item is no longer visible - release it
+            releaseCurrentItem()
+        }
+
+        fun onRecycled() {
+            releaseCurrentItem()
+        }
+
+        private fun releaseCurrentItem() {
+            tickObserverJob?.cancel()
+            tickObserverJob = null
+
+            currentTickingItem?.stop()
+            currentTickingItem = null
+
+            currentLazyAccess?.release()
+            currentLazyAccess = null
         }
     }
 }

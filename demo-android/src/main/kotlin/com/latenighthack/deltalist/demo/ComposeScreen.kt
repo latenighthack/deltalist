@@ -7,11 +7,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,14 +25,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
-import com.latenighthack.deltalist.android.DeltaLazyColumn
+import com.latenighthack.deltalist.LazyAccess
 
 @Composable
 fun ComposeScreen(viewModel: DemoViewModel) {
     var selectedId by remember { mutableStateOf<String?>(null) }
-    val delta by viewModel.items.collectAsState(initial = Delta(emptyList(), Change.Reload))
+    val delta by viewModel.tickingItems.collectAsState(initial = Delta(emptyList(), Change.Reload))
 
-    val selectedIndex = delta.items.indexOfFirst { it.id == selectedId }
+    // Find selected index in the original items list for operations
+    val originalDelta by viewModel.items.collectAsState(initial = Delta(emptyList(), Change.Reload))
+    val selectedIndex = originalDelta.items.indexOfFirst { it.id == selectedId }
 
     Column(modifier = Modifier.fillMaxSize()) {
         ComposeControlButtons(
@@ -50,17 +55,75 @@ fun ComposeScreen(viewModel: DemoViewModel) {
             } else null
         )
 
-        DeltaLazyColumn(
-            deltaFlow = viewModel.items,
-            modifier = Modifier.weight(1f),
-            key = { it.id }
-        ) { item ->
-            ItemCard(
-                item = item,
-                isSelected = item.id == selectedId,
-                onClick = {
-                    selectedId = if (selectedId == item.id) null else item.id
+        LazyColumn(modifier = Modifier.weight(1f)) {
+            items(
+                items = delta.items,
+                // Use item ID for proper item tracking across moves/inserts/removes
+                key = { lazyAccess -> lazyAccess.getOrAcquire().item.id }
+            ) { lazyAccess ->
+                LazyTickingItemCard(
+                    lazyAccess = lazyAccess,
+                    isSelected = { id -> id == selectedId },
+                    onClick = { id ->
+                        selectedId = if (selectedId == id) null else id
+                    }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A card that handles the LazyAccess lifecycle automatically.
+ * - Acquires the TickingItem when entering composition
+ * - Releases it when leaving composition
+ * - Displays the tick count which updates periodically
+ */
+@Composable
+private fun LazyTickingItemCard(
+    lazyAccess: LazyAccess<TickingItem>,
+    isSelected: (String) -> Boolean,
+    onClick: (String) -> Unit
+) {
+    // Acquire the item - getOrAcquire() is idempotent (returns cached value if exists)
+    val tickingItem = lazyAccess.getOrAcquire()
+    val itemId = tickingItem.item.id
+
+    // Use item ID as key for lifecycle management.
+    // When the item leaves composition (removed from list), onDispose runs.
+    DisposableEffect(itemId) {
+        onDispose {
+            tickingItem.stop()
+            lazyAccess.release()
+        }
+    }
+
+    // Observe the tick count
+    val tickCount by tickingItem.tickCount.collectAsState()
+    val isItemSelected = isSelected(itemId)
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clickable(onClick = { onClick(itemId) })
+            .then(
+                if (isItemSelected) {
+                    Modifier.background(Color.Blue.copy(alpha = 0.2f))
+                } else {
+                    Modifier
                 }
+            )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = tickingItem.item.title,
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Text(
+                text = "Ticks: $tickCount (resets when scrolled out)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -106,32 +169,5 @@ private fun ComposeControlButtons(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun ItemCard(
-    item: Item,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
-            .clickable(onClick = onClick)
-            .then(
-                if (isSelected) {
-                    Modifier.background(Color.Blue.copy(alpha = 0.2f))
-                } else {
-                    Modifier
-                }
-            )
-    ) {
-        Text(
-            text = item.title,
-            modifier = Modifier.padding(16.dp),
-            style = MaterialTheme.typography.bodyLarge
-        )
     }
 }

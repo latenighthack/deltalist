@@ -5,7 +5,6 @@ import com.latenighthack.deltalist.Delta
 import com.latenighthack.deltalist.DeltaFlow
 import com.latenighthack.deltalist.LazyAccess
 import com.latenighthack.deltalist.Mutation
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlin.concurrent.atomics.AtomicReference
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
@@ -87,6 +86,9 @@ internal class LazyMapState<S, T>(
     )
 
     private val snapshot = AtomicReference<Snapshot<S, T>>(Snapshot(emptyList(), emptyMap()))
+
+    // Cache of LazyAccessImpl instances by index for object stability
+    private val accessorCache = AtomicReference<Map<Int, LazyAccessImpl>>(emptyMap())
 
     /**
      * Apply a delta, atomically updating the source and transforming cache indices.
@@ -191,13 +193,29 @@ internal class LazyMapState<S, T>(
 
     /**
      * Returns a list view that provides thread-safe LazyAccess wrappers.
+     * LazyAccess instances are cached for object stability across list accesses.
      */
     fun asList(): List<LazyAccess<T>> = LazyAccessList()
 
     private inner class LazyAccessList : AbstractList<LazyAccess<T>>() {
         override val size: Int get() = snapshot.load().source.size
 
-        override fun get(index: Int): LazyAccess<T> = LazyAccessImpl(index)
+        override fun get(index: Int): LazyAccess<T> {
+            // Return cached accessor for object stability
+            while (true) {
+                val currentCache = accessorCache.load()
+                currentCache[index]?.let { return it }
+
+                // Create new accessor and cache it
+                val newAccessor = LazyAccessImpl(index)
+                val newCache = currentCache + (index to newAccessor)
+
+                if (accessorCache.compareAndExchange(currentCache, newCache) === currentCache) {
+                    return newAccessor
+                }
+                // CAS failed - someone else might have created it, retry
+            }
+        }
     }
 
     private inner class LazyAccessImpl(private val index: Int) : LazyAccess<T> {

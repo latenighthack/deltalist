@@ -3,12 +3,9 @@ package com.latenighthack.deltalist.demo
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
@@ -20,7 +17,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.zIndex
 import com.latenighthack.deltalist.demo.ui.theme.DeltaListDemoTheme
 
 class MainActivity : ComponentActivity() {
@@ -58,9 +56,30 @@ fun MainScreen() {
             )
         }
 
-        when (selectedTab) {
-            0 -> ComposeScreen(viewModel = viewModel)
-            1 -> RecyclerViewScreen(viewModel = viewModel)
+        // Keep both screens in composition to demonstrate retention.
+        // When switching tabs, the new screen acquires items before the old releases,
+        // so cached TickingItems (with their tick counts) persist if both screens
+        // are showing the same indices.
+        Box(modifier = Modifier.weight(1f)) {
+            // Compose screen - visible when tab 0 is selected
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(if (selectedTab == 0) 1f else 0f)
+                    .zIndex(if (selectedTab == 0) 1f else 0f)
+            ) {
+                ComposeScreen(viewModel = viewModel)
+            }
+
+            // RecyclerView screen - visible when tab 1 is selected
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(if (selectedTab == 1) 1f else 0f)
+                    .zIndex(if (selectedTab == 1) 1f else 0f)
+            ) {
+                RecyclerViewScreen(viewModel = viewModel)
+            }
         }
     }
 }
