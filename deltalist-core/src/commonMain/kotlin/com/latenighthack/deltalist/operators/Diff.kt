@@ -8,6 +8,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
 /**
+ * Convenience method for self-keyed items
+ */
+fun <T> Flow<List<T>>.asDeltaFlow(): DeltaFlow<T> = asDeltaFlow { it }
+
+/**
  * Converts a Flow<List<T>> to a DeltaFlow<T> by automatically computing the
  * difference between consecutive list emissions.
  *
