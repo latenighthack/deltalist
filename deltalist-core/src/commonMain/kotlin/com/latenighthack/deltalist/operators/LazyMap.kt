@@ -5,6 +5,8 @@ import com.latenighthack.deltalist.Delta
 import com.latenighthack.deltalist.DeltaFlow
 import com.latenighthack.deltalist.LazyAccess
 import com.latenighthack.deltalist.Mutation
+import com.latenighthack.deltalist.SoftList
+import com.latenighthack.deltalist.SoftValue
 import kotlinx.coroutines.flow.flow
 import kotlin.concurrent.atomics.AtomicReference
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
@@ -54,13 +56,27 @@ fun <T, R> DeltaFlow<T>.lazyMapWithAccess(transform: (T) -> R): LazyDeltaFlow<R>
 
 /**
  * Simple lazy list that transforms on every access (no caching).
+ * Implements [SoftList] to propagate soft access from the source.
  */
 internal class SimpleLazyMapList<T, R>(
     private val source: List<T>,
     private val transform: (T) -> R
-) : AbstractList<R>() {
+) : AbstractList<R>(), SoftList<R> {
     override val size: Int get() = source.size
     override fun get(index: Int): R = transform(source[index])
+
+    override fun softGet(index: Int): SoftValue<R>? {
+        return if (source is SoftList<T>) {
+            when (val soft = source.softGet(index)) {
+                is SoftValue.Present -> SoftValue.Present(transform(soft.value))
+                is SoftValue.NotLoaded -> soft
+                null -> null
+            }
+        } else {
+            if (index < 0 || index >= source.size) null
+            else SoftValue.Present(transform(source[index]))
+        }
+    }
 }
 
 /**
@@ -194,13 +210,17 @@ internal class LazyMapState<S, T>(
     /**
      * Returns a list view that provides thread-safe LazyAccess wrappers.
      * LazyAccess instances are cached for object stability across list accesses.
-     * The size is captured at creation time for consistency during equality comparisons.
+     * The size and source are captured at creation time for consistency during equality comparisons.
      */
-    fun asList(): List<LazyAccess<T>> = LazyAccessList(snapshot.load().source.size)
+    fun asList(): List<LazyAccess<T>> {
+        val currentSnapshot = snapshot.load()
+        return LazyAccessList(currentSnapshot.source.size, currentSnapshot.source)
+    }
 
     private inner class LazyAccessList(
-        override val size: Int
-    ) : AbstractList<LazyAccess<T>>() {
+        override val size: Int,
+        private val sourceAtCreation: List<S>
+    ) : AbstractList<LazyAccess<T>>(), SoftList<LazyAccess<T>> {
 
         override fun get(index: Int): LazyAccess<T> {
             // Return cached accessor for object stability
@@ -216,6 +236,20 @@ internal class LazyMapState<S, T>(
                     return newAccessor
                 }
                 // CAS failed - someone else might have created it, retry
+            }
+        }
+
+        override fun softGet(index: Int): SoftValue<LazyAccess<T>>? {
+            if (index < 0 || index >= size) return null
+
+            return if (sourceAtCreation is SoftList<S>) {
+                when (val soft = sourceAtCreation.softGet(index)) {
+                    is SoftValue.Present -> SoftValue.Present(get(index))
+                    is SoftValue.NotLoaded -> soft
+                    null -> null
+                }
+            } else {
+                SoftValue.Present(get(index))
             }
         }
     }
