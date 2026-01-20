@@ -69,12 +69,13 @@ fun <T> DeltaFlow<LazyAccess<T>>.withStableLazyIds(): DeltaFlow<StableLazyAccess
 
 /**
  * Lazy list wrapper that adds stable IDs without accessing source items until needed.
+ * Uses idMapping.size as the source of truth to ensure consistency between size and get().
  */
 internal class StableItemList<T>(
     private val source: List<T>,
     private val idMapping: List<Int>
 ) : AbstractList<StableItem<T>>() {
-    override val size: Int get() = source.size
+    override val size: Int get() = idMapping.size
 
     override fun get(index: Int): StableItem<T> =
         StableItemImpl(idMapping[index], source[index])
@@ -82,12 +83,13 @@ internal class StableItemList<T>(
 
 /**
  * Lazy list wrapper for LazyAccess items that adds stable IDs without accessing source items until needed.
+ * Uses idMapping.size as the source of truth to ensure consistency between size and get().
  */
 internal class StableLazyAccessList<T>(
     private val source: List<LazyAccess<T>>,
     private val idMapping: List<Int>
 ) : AbstractList<StableLazyAccess<T>>() {
-    override val size: Int get() = source.size
+    override val size: Int get() = idMapping.size
 
     override fun get(index: Int): StableLazyAccess<T> =
         StableLazyAccessImpl(idMapping[index], source[index])

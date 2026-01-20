@@ -305,7 +305,14 @@ internal class PaginatedListWrapper<T>(
         if (index < 0 || index >= effectiveSize) return null
 
         // Within bounds but not yet loaded
-        if (index >= realSize) return SoftValue.NotLoaded
+        if (index >= realSize) {
+            return SoftValue.NotLoaded {
+                // Trigger the appropriate fetch based on available data
+                if (hasMoreAfter) {
+                    onAccessNearEnd()
+                }
+            }
+        }
 
         // Loaded
         return SoftValue.Present(items[index])

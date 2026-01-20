@@ -13,8 +13,24 @@ sealed class SoftValue<out T> {
      * The value is within the expected bounds but not yet loaded.
      * This typically occurs with paginated lists where the estimated size
      * is larger than the currently loaded items.
+     *
+     * Call [request] to trigger a fetch for this value if one is available.
      */
-    data object NotLoaded : SoftValue<Nothing>()
+    class NotLoaded(private val onRequest: (() -> Unit)? = null) : SoftValue<Nothing>() {
+        /**
+         * Requests that the value be loaded. This will trigger the appropriate
+         * fetch operation if one is available. Has no effect if no fetch
+         * operation is associated with this NotLoaded instance.
+         */
+        fun request() {
+            onRequest?.invoke()
+        }
+
+        // All NotLoaded instances are equal regardless of callback
+        override fun equals(other: Any?): Boolean = other is NotLoaded
+        override fun hashCode(): Int = NotLoaded::class.hashCode()
+        override fun toString(): String = "NotLoaded"
+    }
 }
 
 /**

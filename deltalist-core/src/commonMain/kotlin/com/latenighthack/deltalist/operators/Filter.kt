@@ -91,7 +91,14 @@ internal class FilteredList<T>(
 
         // Beyond loaded but within estimated size
         if (index < size) {
-            return SoftValue.NotLoaded
+            // Proxy to the source's NotLoaded to get its fetch callback
+            if (source is SoftList<*>) {
+                val sourceSoftValue = source.softGet(sourceLoadedCount)
+                if (sourceSoftValue is SoftValue.NotLoaded) {
+                    return sourceSoftValue
+                }
+            }
+            return SoftValue.NotLoaded()
         }
 
         // Out of bounds

@@ -194,11 +194,13 @@ internal class LazyMapState<S, T>(
     /**
      * Returns a list view that provides thread-safe LazyAccess wrappers.
      * LazyAccess instances are cached for object stability across list accesses.
+     * The size is captured at creation time for consistency during equality comparisons.
      */
-    fun asList(): List<LazyAccess<T>> = LazyAccessList()
+    fun asList(): List<LazyAccess<T>> = LazyAccessList(snapshot.load().source.size)
 
-    private inner class LazyAccessList : AbstractList<LazyAccess<T>>() {
-        override val size: Int get() = snapshot.load().source.size
+    private inner class LazyAccessList(
+        override val size: Int
+    ) : AbstractList<LazyAccess<T>>() {
 
         override fun get(index: Int): LazyAccess<T> {
             // Return cached accessor for object stability
