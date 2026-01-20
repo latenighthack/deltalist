@@ -694,4 +694,171 @@ class PaginatedDeltaFlowTest {
 
         job.cancel()
     }
+
+    // ========== SoftList Tests ==========
+
+    @Test
+    fun softGetReturnsLoadedItems() = runTest {
+        val flow = paginatedDeltaFlow<Item, String>(
+            scope = this,
+            startToken = "initial",
+            fetch = { direction, token ->
+                Page(
+                    items = listOf(Item(1, "A"), Item(2, "B")),
+                    beforeToken = null,
+                    afterToken = null,
+                    estimatedTotalSize = 100
+                )
+            }
+        )
+
+        val results = mutableListOf<Delta<Item>>()
+        val job = launch {
+            flow.collect { results.add(it) }
+        }
+
+        delay(100)
+
+        val list = results.last().items
+        assertTrue(list is SoftList<Item>)
+
+        // Loaded items should return Present
+        val soft0 = (list as SoftList<Item>).softGet(0)
+        assertTrue(soft0 is SoftValue.Present)
+        assertEquals(Item(1, "A"), (soft0 as SoftValue.Present).value)
+
+        val soft1 = list.softGet(1)
+        assertTrue(soft1 is SoftValue.Present)
+        assertEquals(Item(2, "B"), (soft1 as SoftValue.Present).value)
+
+        job.cancel()
+    }
+
+    @Test
+    fun softGetReturnsNotLoadedForUnloadedItems() = runTest {
+        val flow = paginatedDeltaFlow<Item, String>(
+            scope = this,
+            startToken = "initial",
+            fetch = { direction, token ->
+                Page(
+                    items = listOf(Item(1, "A"), Item(2, "B")),
+                    beforeToken = null,
+                    afterToken = null,
+                    estimatedTotalSize = 100
+                )
+            }
+        )
+
+        val results = mutableListOf<Delta<Item>>()
+        val job = launch {
+            flow.collect { results.add(it) }
+        }
+
+        delay(100)
+
+        val list = results.last().items as SoftList<Item>
+
+        // Items within estimated size but not loaded should return NotLoaded
+        val soft50 = list.softGet(50)
+        assertTrue(soft50 is SoftValue.NotLoaded)
+
+        val soft99 = list.softGet(99)
+        assertTrue(soft99 is SoftValue.NotLoaded)
+
+        job.cancel()
+    }
+
+    @Test
+    fun softGetReturnsNullForOutOfBounds() = runTest {
+        val flow = paginatedDeltaFlow<Item, String>(
+            scope = this,
+            startToken = "initial",
+            fetch = { direction, token ->
+                Page(
+                    items = listOf(Item(1, "A"), Item(2, "B")),
+                    beforeToken = null,
+                    afterToken = null,
+                    estimatedTotalSize = 100
+                )
+            }
+        )
+
+        val results = mutableListOf<Delta<Item>>()
+        val job = launch {
+            flow.collect { results.add(it) }
+        }
+
+        delay(100)
+
+        val list = results.last().items as SoftList<Item>
+
+        // Out of bounds should return null
+        assertEquals(null, list.softGet(-1))
+        assertEquals(null, list.softGet(100))
+        assertEquals(null, list.softGet(1000))
+
+        job.cancel()
+    }
+
+    @Test
+    fun softGetDoesNotTriggerFetch() = runTest {
+        var fetchCount = 0
+
+        val flow = paginatedDeltaFlow<Item, String>(
+            scope = this,
+            startToken = "initial",
+            fetchWindowSize = 1,
+            fetch = { direction, token ->
+                fetchCount++
+                Page(
+                    items = listOf(Item(1, "A"), Item(2, "B"), Item(3, "C")),
+                    beforeToken = "before",
+                    afterToken = "after",
+                    estimatedTotalSize = 100
+                )
+            }
+        )
+
+        val results = mutableListOf<Delta<Item>>()
+        val job = launch {
+            flow.collect { results.add(it) }
+        }
+
+        delay(100)
+        assertEquals(1, fetchCount)
+
+        val list = results.last().items as SoftList<Item>
+
+        // Soft access near boundaries should NOT trigger fetch
+        list.softGet(0)  // Near start
+        list.softGet(2)  // Near end
+        list.softGet(50) // Not loaded
+
+        delay(100)
+        assertEquals(1, fetchCount) // Still just the initial fetch
+
+        // But regular get SHOULD trigger fetch
+        list[2]  // Access near end triggers after fetch
+        delay(100)
+        assertEquals(2, fetchCount)
+
+        job.cancel()
+    }
+
+    @Test
+    fun softGetOrNullExtensionWorksForRegularList() {
+        val regularList = listOf("A", "B", "C")
+
+        val soft0 = regularList.softGetOrNull(0)
+        assertTrue(soft0 is SoftValue.Present)
+        assertEquals("A", (soft0 as SoftValue.Present).value)
+
+        val soft2 = regularList.softGetOrNull(2)
+        assertTrue(soft2 is SoftValue.Present)
+        assertEquals("C", (soft2 as SoftValue.Present).value)
+
+        // Out of bounds returns null for regular list
+        assertEquals(null, regularList.softGetOrNull(-1))
+        assertEquals(null, regularList.softGetOrNull(3))
+    }
 }

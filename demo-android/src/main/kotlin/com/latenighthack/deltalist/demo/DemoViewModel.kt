@@ -5,6 +5,7 @@ import com.latenighthack.deltalist.LoadDirection
 import com.latenighthack.deltalist.Page
 import com.latenighthack.deltalist.StableLazyAccess
 import com.latenighthack.deltalist.mutableDeltaFlowOf
+import com.latenighthack.deltalist.operators.filterItemsDynamic
 import com.latenighthack.deltalist.operators.lazyMapWithAccess
 import com.latenighthack.deltalist.operators.withStableLazyIds
 import com.latenighthack.deltalist.paginatedDeltaFlow
@@ -15,6 +16,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import java.util.UUID
 
 class DemoViewModel {
@@ -31,9 +33,9 @@ class DemoViewModel {
     private val _paginatedLoadedCount = MutableStateFlow(0)
     val paginatedLoadedCount: StateFlow<Int> = _paginatedLoadedCount.asStateFlow()
 
-    val paginatedNumbers: DeltaFlow<Int> = paginatedDeltaFlow(
+    private val basePaginatedNumbers: DeltaFlow<Int> = paginatedDeltaFlow(
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-        fetchWindowSize = 5,
+        fetchWindowSize = 2,
         startToken = 0
     ) { direction, pageToken ->
         // Signal loading started
@@ -43,7 +45,7 @@ class DemoViewModel {
             // Simulate network delay
             delay(500)
 
-            val pageSize = 50
+            val pageSize = 20
             val totalItems = 10_000
             val startIndex = pageToken * pageSize
             val endIndex = minOf(startIndex + pageSize, totalItems)
@@ -62,6 +64,28 @@ class DemoViewModel {
         } finally {
             // Signal loading completed
             _paginatedLoadingDirection.value = null
+        }
+    }
+
+    // Filter state - set of divisors to exclude
+    private val _excludeDivisors = MutableStateFlow<Set<Int>>(emptySet())
+    val excludeDivisors: StateFlow<Set<Int>> = _excludeDivisors.asStateFlow()
+
+    // The filtered paginated list - filters out numbers divisible by any excluded divisor
+    // Uses SoftList-aware filtering so it doesn't trigger unwanted fetches
+    // Updates immediately when filter checkboxes are toggled
+    val paginatedNumbers: DeltaFlow<Int> = basePaginatedNumbers
+        .filterItemsDynamic(
+            _excludeDivisors.map { divisors ->
+                { number: Int -> divisors.none { d -> number % d == 0 } }
+            }
+        )
+
+    fun toggleDivisorFilter(divisor: Int) {
+        _excludeDivisors.value = if (divisor in _excludeDivisors.value) {
+            _excludeDivisors.value - divisor
+        } else {
+            _excludeDivisors.value + divisor
         }
     }
 
