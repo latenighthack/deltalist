@@ -242,6 +242,7 @@ internal class PaginatedDeltaFlowImpl<T, U>(
 
 /**
  * A list wrapper that intercepts access to trigger pagination fetches and reports estimated size.
+ * Implements [SoftList] to allow operators to inspect values without triggering fetches.
  */
 internal class PaginatedListWrapper<T>(
     private val items: List<T>,
@@ -252,7 +253,7 @@ internal class PaginatedListWrapper<T>(
     private val onAccessNearStart: () -> Unit,
     private val onAccessNearEnd: () -> Unit,
     private val onAccessWhenEmpty: () -> Unit
-) : AbstractList<T>() {
+) : AbstractList<T>(), SoftList<T> {
 
     override val size: Int
         get() {
@@ -294,6 +295,20 @@ internal class PaginatedListWrapper<T>(
         }
 
         return items[index]
+    }
+
+    override fun softGet(index: Int): SoftValue<T>? {
+        val realSize = items.size
+        val effectiveSize = estimatedTotalSize?.let { maxOf(it, realSize) } ?: realSize
+
+        // Out of bounds
+        if (index < 0 || index >= effectiveSize) return null
+
+        // Within bounds but not yet loaded
+        if (index >= realSize) return SoftValue.NotLoaded
+
+        // Loaded
+        return SoftValue.Present(items[index])
     }
 
     // Override equals/hashCode to avoid triggering fetches during StateFlow comparison
