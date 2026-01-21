@@ -31,7 +31,7 @@ android {
 }
 
 dependencies {
-    implementation(project(":deltalist-core"))
+    implementation(project(":demo-core"))
     implementation(project(":deltalist-android-recyclerview"))
     implementation(project(":deltalist-android-compose"))
 

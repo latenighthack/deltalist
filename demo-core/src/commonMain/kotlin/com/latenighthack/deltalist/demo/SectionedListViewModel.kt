@@ -6,14 +6,6 @@ import com.latenighthack.deltalist.Section
 import com.latenighthack.deltalist.SectionedDeltaList
 import com.latenighthack.deltalist.mutableSectionedDeltaListOf
 import com.latenighthack.deltalist.operators.flatten
-import java.util.UUID
-
-data class SectionHeader(val title: String, val color: Long)
-
-sealed class SectionRow {
-    data class Header(val header: SectionHeader) : SectionRow()
-    data class ItemRow(val item: Item) : SectionRow()
-}
 
 class SectionedListViewModel {
     private val sectionColors = listOf(
@@ -29,23 +21,23 @@ class SectionedListViewModel {
             Section(
                 SectionHeader("Favorites", sectionColors[0]),
                 listOf(
-                    Item(UUID.randomUUID().toString(), "Favorite 1"),
-                    Item(UUID.randomUUID().toString(), "Favorite 2")
+                    Item(randomUUID(), "Favorite 1"),
+                    Item(randomUUID(), "Favorite 2")
                 )
             ),
             Section(
                 SectionHeader("Recent", sectionColors[1]),
                 listOf(
-                    Item(UUID.randomUUID().toString(), "Recent 1"),
-                    Item(UUID.randomUUID().toString(), "Recent 2"),
-                    Item(UUID.randomUUID().toString(), "Recent 3")
+                    Item(randomUUID(), "Recent 1"),
+                    Item(randomUUID(), "Recent 2"),
+                    Item(randomUUID(), "Recent 3")
                 )
             ),
             Section(
                 SectionHeader("All Items", sectionColors[2]),
                 listOf(
-                    Item(UUID.randomUUID().toString(), "Item A"),
-                    Item(UUID.randomUUID().toString(), "Item B")
+                    Item(randomUUID(), "Item A"),
+                    Item(randomUUID(), "Item B")
                 )
             )
         )
@@ -65,7 +57,7 @@ class SectionedListViewModel {
         val colorIndex = _sections.value.size % sectionColors.size
         _sections.appendSection(
             SectionHeader("Section ${++sectionCounter}", sectionColors[colorIndex]),
-            listOf(Item(UUID.randomUUID().toString(), "New Item ${++sectionItemCounter}"))
+            listOf(Item(randomUUID(), "New Item ${++sectionItemCounter}"))
         )
     }
 
@@ -77,7 +69,7 @@ class SectionedListViewModel {
 
     fun addItemToSection(sectionIndex: Int) {
         if (sectionIndex in 0 until _sections.value.size) {
-            _sections.appendItem(sectionIndex, Item(UUID.randomUUID().toString(), "Added ${++sectionItemCounter}"))
+            _sections.appendItem(sectionIndex, Item(randomUUID(), "Added ${++sectionItemCounter}"))
         }
     }
 

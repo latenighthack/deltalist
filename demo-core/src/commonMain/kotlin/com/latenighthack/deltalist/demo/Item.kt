@@ -44,3 +44,10 @@ class TickingItem(
         tickJob = null
     }
 }
+
+data class SectionHeader(val title: String, val color: Long)
+
+sealed class SectionRow {
+    data class Header(val header: SectionHeader) : SectionRow()
+    data class ItemRow(val item: Item) : SectionRow()
+}

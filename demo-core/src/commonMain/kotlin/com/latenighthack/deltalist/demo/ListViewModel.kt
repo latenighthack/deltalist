@@ -8,7 +8,6 @@ import com.latenighthack.deltalist.operators.withStableIds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import java.util.UUID
 
 class ListViewModel {
     private val _items = mutableDeltaListOf<Item>()
@@ -26,7 +25,7 @@ class ListViewModel {
     private var counter = 0
 
     fun addItem() {
-        val id = UUID.randomUUID().toString()
+        val id = randomUUID()
         _items.append(Item(id, "Item ${++counter}"))
     }
 
@@ -37,19 +36,19 @@ class ListViewModel {
     }
 
     fun insertBefore(index: Int) {
-        val id = UUID.randomUUID().toString()
+        val id = randomUUID()
         _items.insert(index, Item(id, "Inserted ${++counter}"))
     }
 
     fun insertAfter(index: Int) {
-        val id = UUID.randomUUID().toString()
+        val id = randomUUID()
         _items.insert(index + 1, Item(id, "Inserted ${++counter}"))
     }
 
     fun batchAdd() {
         _items.update { list ->
             repeat(5) {
-                list.add(Item(UUID.randomUUID().toString(), "Batch ${++counter}"))
+                list.add(Item(randomUUID(), "Batch ${++counter}"))
             }
         }
     }

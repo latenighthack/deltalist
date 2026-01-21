@@ -4,11 +4,10 @@ import com.latenighthack.deltalist.MoveableDeltaList
 import com.latenighthack.deltalist.mutableDeltaListOf
 import com.latenighthack.deltalist.moveable
 import kotlinx.coroutines.delay
-import java.util.UUID
 
 class DragDropViewModel {
     private val _items = mutableDeltaListOf(
-        (1..10).map { Item(UUID.randomUUID().toString(), "Item $it") }
+        (1..10).map { Item(randomUUID(), "Item $it") }
     )
 
     /**
@@ -34,12 +33,12 @@ class DragDropViewModel {
     private var counter = 10
 
     fun addItem() {
-        val id = UUID.randomUUID().toString()
+        val id = randomUUID()
         _items.append(Item(id, "Item ${++counter}"))
     }
 
     fun addPinnedItem() {
-        val id = UUID.randomUUID().toString()
+        val id = randomUUID()
         _items.insert(0, Item(id, "Pinned ${++counter}"))
     }
 
@@ -50,7 +49,7 @@ class DragDropViewModel {
     fun reset() {
         counter = 10
         _items.reload(
-            (1..10).map { Item(UUID.randomUUID().toString(), "Item $it") }
+            (1..10).map { Item(randomUUID(), "Item $it") }
         )
     }
 }
