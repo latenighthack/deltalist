@@ -33,7 +33,8 @@ sealed class DragState<out T> {
     data class Committing<T>(
         val item: T,
         val fromIndex: Int,
-        val toIndex: Int
+        val toIndex: Int,
+        val confirmed: Boolean = false
     ) : DragState<T>()
 }
 
@@ -172,7 +173,7 @@ internal class MoveableDeltaFlowImpl<T>(
         val item = newItems.removeAt(current.previewIndex)
         newItems.add(clampedIndex, item)
 
-        // Emit the reordered list with a Move mutation
+        // Emit the reordered list with Move mutation
         _currentDelta.value = Delta(
             newItems,
             Change.Mutations(listOf(Mutation.Move(current.previewIndex, clampedIndex)))
@@ -233,6 +234,34 @@ internal class MoveableDeltaFlowImpl<T>(
         originalDragIndex = -1
     }
 
+    /**
+     * Check if the mutations represent the move we just committed.
+     * This can be a single Move operation or a Delete+Insert combo.
+     */
+    private fun isExpectedMoveOperation(
+        operations: List<Mutation>,
+        expectedFrom: Int,
+        expectedTo: Int
+    ): Boolean {
+        return when {
+            // Single Move operation
+            operations.size == 1 && operations[0] is Mutation.Move -> {
+                val move = operations[0] as Mutation.Move
+                move.fromIndex == expectedFrom && move.toIndex == expectedTo
+            }
+            // Delete + Insert combo
+            operations.size == 2 &&
+                operations[0] is Mutation.Remove &&
+                operations[1] is Mutation.Insert -> {
+                val remove = operations[0] as Mutation.Remove
+                val insert = operations[1] as Mutation.Insert
+                remove.index == expectedFrom && remove.count == 1 &&
+                    insert.index == expectedTo && insert.count == 1
+            }
+            else -> false
+        }
+    }
+
     override suspend fun collect(collector: FlowCollector<Delta<T>>) {
         val upstreamFlow = upstream.map { delta ->
             val currentState = _dragState.value
@@ -242,9 +271,24 @@ internal class MoveableDeltaFlowImpl<T>(
                     delta
                 }
                 currentState is DragState.Committing -> {
-                    // After commit, accept upstream state
                     _currentDelta.value = delta
-                    delta
+                    if (currentState.confirmed) {
+                        // Already received confirmation (e.g., Reload), pass through
+                        delta
+                    } else {
+                        // First delta - check if it's our expected move to skip
+                        val isExpectedMove = when (val change = delta.change) {
+                            is Change.Reload -> false // Reload syncs everything
+                            is Change.Mutations -> isExpectedMoveOperation(
+                                change.operations,
+                                currentState.fromIndex,
+                                currentState.toIndex
+                            )
+                        }
+                        // Mark confirmed so subsequent deltas pass through
+                        _dragState.value = currentState.copy(confirmed = true)
+                        if (isExpectedMove) null else delta
+                    }
                 }
                 else -> null // During Dragging, ignore upstream
             }
