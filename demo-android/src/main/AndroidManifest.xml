@@ -17,6 +17,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".ListActivity"
+            android:exported="false"
+            android:theme="@style/Theme.DeltaListDemo" />
+        <activity
+            android:name=".PaginatedListActivity"
+            android:exported="false"
+            android:theme="@style/Theme.DeltaListDemo" />
+        <activity
+            android:name=".SectionedListActivity"
+            android:exported="false"
+            android:theme="@style/Theme.DeltaListDemo" />
     </application>
 
 </manifest>

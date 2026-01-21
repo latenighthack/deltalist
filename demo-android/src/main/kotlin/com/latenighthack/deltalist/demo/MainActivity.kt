@@ -1,24 +1,25 @@
 package com.latenighthack.deltalist.demo
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.zIndex
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import com.latenighthack.deltalist.demo.ui.theme.DeltaListDemoTheme
 
 class MainActivity : ComponentActivity() {
@@ -39,62 +40,55 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MainScreen() {
-    val viewModel = remember { DemoViewModel() }
-    var selectedTab by remember { mutableIntStateOf(0) }
+    val context = LocalContext.current
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        TabRow(selectedTabIndex = selectedTab) {
-            Tab(
-                selected = selectedTab == 0,
-                onClick = { selectedTab = 0 },
-                text = { Text("Compose") }
-            )
-            Tab(
-                selected = selectedTab == 1,
-                onClick = { selectedTab = 1 },
-                text = { Text("RecyclerView") }
-            )
-            Tab(
-                selected = selectedTab == 2,
-                onClick = { selectedTab = 2 },
-                text = { Text("Paginated") }
-            )
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "DeltaList Demo",
+            style = MaterialTheme.typography.headlineLarge
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "Reactive list library with efficient mutations",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(48.dp))
+
+        Button(
+            onClick = { context.startActivity(Intent(context, ListActivity::class.java)) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp)
+        ) {
+            Text("Basic List Demo")
         }
 
-        // Keep both screens in composition to demonstrate retention.
-        // When switching tabs, the new screen acquires items before the old releases,
-        // so cached TickingItems (with their tick counts) persist if both screens
-        // are showing the same indices.
-        Box(modifier = Modifier.weight(1f)) {
-            // Compose screen - visible when tab 0 is selected
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .alpha(if (selectedTab == 0) 1f else 0f)
-                    .zIndex(if (selectedTab == 0) 1f else 0f)
-            ) {
-                ComposeScreen(viewModel = viewModel)
-            }
+        Button(
+            onClick = { context.startActivity(Intent(context, PaginatedListActivity::class.java)) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp)
+        ) {
+            Text("Paginated List Demo")
+        }
 
-            // RecyclerView screen - visible when tab 1 is selected
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .alpha(if (selectedTab == 1) 1f else 0f)
-                    .zIndex(if (selectedTab == 1) 1f else 0f)
-            ) {
-                RecyclerViewScreen(viewModel = viewModel)
-            }
-
-            // Paginated list screen - visible when tab 2 is selected
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .alpha(if (selectedTab == 2) 1f else 0f)
-                    .zIndex(if (selectedTab == 2) 1f else 0f)
-            ) {
-                PaginatedListScreen(viewModel = viewModel)
-            }
+        Button(
+            onClick = { context.startActivity(Intent(context, SectionedListActivity::class.java)) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp)
+        ) {
+            Text("Sectioned List Demo")
         }
     }
 }
