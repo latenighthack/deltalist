@@ -1,4 +1,4 @@
-package com.latenighthack.deltalist.android
+package com.latenighthack.deltalist.android.compose
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState

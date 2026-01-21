@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.latenighthack.deltalist.android"
+    namespace = "com.latenighthack.deltalist.android.compose"
     compileSdk = 34
 
     defaultConfig {
@@ -30,13 +30,10 @@ dependencies {
     implementation(project(":deltalist-core"))
 
     implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.androidx.recyclerview)
 
     // Compose
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.foundation)
     implementation(libs.compose.runtime)
-    implementation(libs.compose.material3)
 }

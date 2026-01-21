@@ -32,7 +32,8 @@ android {
 
 dependencies {
     implementation(project(":deltalist-core"))
-    implementation(project(":deltalist-android"))
+    implementation(project(":deltalist-android-recyclerview"))
+    implementation(project(":deltalist-android-compose"))
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.activity.compose)

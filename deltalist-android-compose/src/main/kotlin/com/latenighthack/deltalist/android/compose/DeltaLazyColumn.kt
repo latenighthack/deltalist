@@ -1,4 +1,4 @@
-package com.latenighthack.deltalist.android
+package com.latenighthack.deltalist.android.compose
 
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyItemScope

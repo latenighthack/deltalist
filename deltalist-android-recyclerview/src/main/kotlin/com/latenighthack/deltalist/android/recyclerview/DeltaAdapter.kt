@@ -1,4 +1,4 @@
-package com.latenighthack.deltalist.android
+package com.latenighthack.deltalist.android.recyclerview
 
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
