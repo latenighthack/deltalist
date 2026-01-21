@@ -43,7 +43,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
-import com.latenighthack.deltalist.DeltaFlow
+import com.latenighthack.deltalist.DeltaList
 import com.latenighthack.deltalist.Mutation
 import com.latenighthack.deltalist.SoftList
 import com.latenighthack.deltalist.SoftValue
@@ -307,7 +307,7 @@ private fun LoadingItemCard(index: Int) {
 
 // RecyclerView Adapter for paginated numbers
 private class PaginatedNumberAdapter(
-    private val deltaFlow: DeltaFlow<Int>
+    private val deltaFlow: DeltaList<Int>
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private var items: List<Int> = emptyList()

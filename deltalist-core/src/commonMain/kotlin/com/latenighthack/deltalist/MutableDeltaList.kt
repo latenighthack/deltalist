@@ -4,7 +4,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
 
-interface MutableDeltaFlow<T> : Flow<Delta<T>> {
+interface MutableDeltaList<T> : Flow<Delta<T>> {
     val value: List<T>
 
     fun update(block: (MutableList<T>) -> Unit)
@@ -21,9 +21,12 @@ interface MutableDeltaFlow<T> : Flow<Delta<T>> {
     fun clear()
 }
 
-internal class MutableDeltaFlowImpl<T>(
+@Deprecated("Use MutableDeltaList instead", ReplaceWith("MutableDeltaList<T>"))
+typealias MutableDeltaFlow<T> = MutableDeltaList<T>
+
+internal class MutableDeltaListImpl<T>(
     initial: List<T>
-) : MutableDeltaFlow<T> {
+) : MutableDeltaList<T> {
     private val state = MutableStateFlow(Delta(initial, Change.Reload))
 
     override val value: List<T> get() = state.value.items
@@ -81,5 +84,9 @@ internal class MutableDeltaFlowImpl<T>(
     }
 }
 
-fun <T> mutableDeltaFlowOf(initial: List<T> = emptyList()): MutableDeltaFlow<T> =
-    MutableDeltaFlowImpl(initial)
+fun <T> mutableDeltaListOf(initial: List<T> = emptyList()): MutableDeltaList<T> =
+    MutableDeltaListImpl(initial)
+
+@Deprecated("Use mutableDeltaListOf instead", ReplaceWith("mutableDeltaListOf(initial)"))
+fun <T> mutableDeltaFlowOf(initial: List<T> = emptyList()): MutableDeltaList<T> =
+    mutableDeltaListOf(initial)

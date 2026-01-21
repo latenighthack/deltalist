@@ -19,7 +19,7 @@ enum class LoadDirection {
 }
 
 /**
- * Creates a paginated [DeltaFlow] that lazily fetches pages of data as items near
+ * Creates a paginated [DeltaList] that lazily fetches pages of data as items near
  * the boundaries of the loaded data are accessed.
  *
  * @param T The type of items in the list
@@ -33,19 +33,27 @@ enum class LoadDirection {
  *        and the token for that direction. The closure can use the direction to manage
  *        its own loading state (e.g., emit to a separate loading flow).
  */
+fun <T, U> paginatedDeltaList(
+    scope: CoroutineScope,
+    fetchWindowSize: Int = 1,
+    startToken: U,
+    fetch: suspend (direction: LoadDirection, token: U) -> Page<T, U>
+): DeltaList<T> = PaginatedDeltaListImpl(scope, fetchWindowSize, startToken, fetch)
+
+@Deprecated("Use paginatedDeltaList instead", ReplaceWith("paginatedDeltaList(scope, fetchWindowSize, startToken, fetch)"))
 fun <T, U> paginatedDeltaFlow(
     scope: CoroutineScope,
     fetchWindowSize: Int = 1,
     startToken: U,
     fetch: suspend (direction: LoadDirection, token: U) -> Page<T, U>
-): DeltaFlow<T> = PaginatedDeltaFlowImpl(scope, fetchWindowSize, startToken, fetch)
+): DeltaList<T> = paginatedDeltaList(scope, fetchWindowSize, startToken, fetch)
 
-internal class PaginatedDeltaFlowImpl<T, U>(
+internal class PaginatedDeltaListImpl<T, U>(
     private val scope: CoroutineScope,
     private val fetchWindowSize: Int,
     private val startToken: U,
     private val fetch: suspend (direction: LoadDirection, token: U) -> Page<T, U>
-) : DeltaFlow<T> {
+) : DeltaList<T> {
 
     private val mutex = Mutex()
 

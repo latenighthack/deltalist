@@ -2,7 +2,7 @@ package com.latenighthack.deltalist.operators
 
 import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
-import com.latenighthack.deltalist.DeltaFlow
+import com.latenighthack.deltalist.DeltaList
 import com.latenighthack.deltalist.LazyAccess
 import com.latenighthack.deltalist.Mutation
 import com.latenighthack.deltalist.StableItem
@@ -22,8 +22,8 @@ import kotlinx.coroutines.flow.flow
  *
  * Example:
  * ```
- * val items: DeltaFlow<MyItem> = ...
- * val stableItems: DeltaFlow<StableItem<MyItem>> = items.withStableIds()
+ * val items: DeltaList<MyItem> = ...
+ * val stableItems: DeltaList<StableItem<MyItem>> = items.withStableIds()
  *
  * // In Compose:
  * items(stableItems, key = { it.stableId }) { stableItem ->
@@ -31,7 +31,7 @@ import kotlinx.coroutines.flow.flow
  * }
  * ```
  */
-fun <T> DeltaFlow<T>.withStableIds(): DeltaFlow<StableItem<T>> = flow {
+fun <T> DeltaList<T>.withStableIds(): DeltaList<StableItem<T>> = flow {
     val adapter = StableIdAdapter<T>()
 
     collect { delta ->
@@ -46,7 +46,7 @@ fun <T> DeltaFlow<T>.withStableIds(): DeltaFlow<StableItem<T>> = flow {
  *
  * Example:
  * ```
- * val items: DeltaFlow<Item> = ...
+ * val items: DeltaList<Item> = ...
  * val lazyItems = items.lazyMapWithAccess { transform(it) }.withStableLazyIds()
  *
  * // In Compose:
@@ -59,7 +59,7 @@ fun <T> DeltaFlow<T>.withStableIds(): DeltaFlow<StableItem<T>> = flow {
  * }
  * ```
  */
-fun <T> DeltaFlow<LazyAccess<T>>.withStableLazyIds(): DeltaFlow<StableLazyAccess<T>> = flow {
+fun <T> DeltaList<LazyAccess<T>>.withStableLazyIds(): DeltaList<StableLazyAccess<T>> = flow {
     val adapter = StableLazyAccessAdapter<T>()
 
     collect { delta ->

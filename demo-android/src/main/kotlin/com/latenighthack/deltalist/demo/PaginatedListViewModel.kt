@@ -1,10 +1,10 @@
 package com.latenighthack.deltalist.demo
 
-import com.latenighthack.deltalist.DeltaFlow
+import com.latenighthack.deltalist.DeltaList
 import com.latenighthack.deltalist.LoadDirection
 import com.latenighthack.deltalist.Page
 import com.latenighthack.deltalist.operators.filterItemsDynamic
-import com.latenighthack.deltalist.paginatedDeltaFlow
+import com.latenighthack.deltalist.paginatedDeltaList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,7 +21,7 @@ class PaginatedListViewModel {
     private val _paginatedLoadedCount = MutableStateFlow(0)
     val paginatedLoadedCount: StateFlow<Int> = _paginatedLoadedCount.asStateFlow()
 
-    private val basePaginatedNumbers: DeltaFlow<Int> = paginatedDeltaFlow(
+    private val basePaginatedNumbers: DeltaList<Int> = paginatedDeltaList(
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
         fetchWindowSize = 2,
         startToken = 0
@@ -54,7 +54,7 @@ class PaginatedListViewModel {
     private val _excludeDivisors = MutableStateFlow<Set<Int>>(emptySet())
     val excludeDivisors: StateFlow<Set<Int>> = _excludeDivisors.asStateFlow()
 
-    val paginatedNumbers: DeltaFlow<Int> = basePaginatedNumbers
+    val paginatedNumbers: DeltaList<Int> = basePaginatedNumbers
         .filterItemsDynamic(
             _excludeDivisors.map { divisors ->
                 { number: Int -> divisors.none { d -> number % d == 0 } }

@@ -2,7 +2,7 @@ package com.latenighthack.deltalist.operators
 
 import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
-import com.latenighthack.deltalist.DeltaFlow
+import com.latenighthack.deltalist.DeltaList
 import com.latenighthack.deltalist.Mutation
 import com.latenighthack.deltalist.SoftList
 import com.latenighthack.deltalist.SoftValue
@@ -123,7 +123,7 @@ internal class FilteredList<T>(
     }
 }
 
-fun <T> DeltaFlow<T>.filterItems(predicate: (T) -> Boolean): DeltaFlow<T> = flow {
+fun <T> DeltaList<T>.filterItems(predicate: (T) -> Boolean): DeltaList<T> = flow {
     var previousFilteredIndices: Set<Int> = emptySet()
     var previousSourceItems: List<T> = emptyList()
 
@@ -188,9 +188,9 @@ private sealed class FilterEvent<out T> {
  * @param predicateFlow A [Flow] that emits predicate functions. Each emission
  *        triggers a re-filter of the current items.
  */
-fun <T> DeltaFlow<T>.filterItemsDynamic(
+fun <T> DeltaList<T>.filterItemsDynamic(
     predicateFlow: kotlinx.coroutines.flow.Flow<(T) -> Boolean>
-): DeltaFlow<T> = flow {
+): DeltaList<T> = flow {
     var currentSourceItems: List<T> = emptyList()
     var currentSourceLoadedCount: Int = 0
     var previousFilteredIndices: Set<Int> = emptySet()

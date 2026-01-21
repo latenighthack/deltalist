@@ -5,13 +5,13 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.RecyclerView
 import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
-import com.latenighthack.deltalist.DeltaFlow
+import com.latenighthack.deltalist.DeltaList
 import com.latenighthack.deltalist.Mutation
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 abstract class DeltaAdapter<T, VH : RecyclerView.ViewHolder>(
-    private val deltaFlow: DeltaFlow<T>
+    private val deltaFlow: DeltaList<T>
 ) : RecyclerView.Adapter<VH>() {
 
     private var items: List<T> = emptyList()

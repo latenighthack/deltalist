@@ -7,7 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 /**
  * A mutable state holder for sectioned delta emissions.
  */
-interface MutableSectionedDeltaFlow<S, T> : Flow<SectionedDelta<S, T>> {
+interface MutableSectionedDeltaList<S, T> : Flow<SectionedDelta<S, T>> {
     val value: List<Section<S, T>>
 
     // Section-level operations
@@ -29,9 +29,12 @@ interface MutableSectionedDeltaFlow<S, T> : Flow<SectionedDelta<S, T>> {
     fun reload(sections: List<Section<S, T>>)
 }
 
-internal class MutableSectionedDeltaFlowImpl<S, T>(
+@Deprecated("Use MutableSectionedDeltaList instead", ReplaceWith("MutableSectionedDeltaList<S, T>"))
+typealias MutableSectionedDeltaFlow<S, T> = MutableSectionedDeltaList<S, T>
+
+internal class MutableSectionedDeltaListImpl<S, T>(
     initial: List<Section<S, T>>
-) : MutableSectionedDeltaFlow<S, T> {
+) : MutableSectionedDeltaList<S, T> {
     private val state = MutableStateFlow(SectionedDelta(initial, SectionedChange.Reload))
 
     override val value: List<Section<S, T>> get() = state.value.sections
@@ -146,6 +149,11 @@ internal class MutableSectionedDeltaFlowImpl<S, T>(
     }
 }
 
+fun <S, T> mutableSectionedDeltaListOf(
+    initial: List<Section<S, T>> = emptyList()
+): MutableSectionedDeltaList<S, T> = MutableSectionedDeltaListImpl(initial)
+
+@Deprecated("Use mutableSectionedDeltaListOf instead", ReplaceWith("mutableSectionedDeltaListOf(initial)"))
 fun <S, T> mutableSectionedDeltaFlowOf(
     initial: List<Section<S, T>> = emptyList()
-): MutableSectionedDeltaFlow<S, T> = MutableSectionedDeltaFlowImpl(initial)
+): MutableSectionedDeltaList<S, T> = mutableSectionedDeltaListOf(initial)

@@ -8,11 +8,11 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
-class MoveableDeltaFlowTest {
+class MoveableDeltaListTest {
 
     @Test
     fun `beginDrag starts drag and updates state`() = runTest {
-        val source = mutableDeltaFlowOf(listOf("A", "B", "C"))
+        val source = mutableDeltaListOf(listOf("A", "B", "C"))
         val moveable = source.moveable { _, _, _ -> true }
 
         // Collect once to populate currentItems
@@ -29,7 +29,7 @@ class MoveableDeltaFlowTest {
 
     @Test
     fun `beginDrag returns false for invalid index`() = runTest {
-        val source = mutableDeltaFlowOf(listOf("A", "B", "C"))
+        val source = mutableDeltaListOf(listOf("A", "B", "C"))
         val moveable = source.moveable { _, _, _ -> true }
 
         moveable.first()
@@ -41,7 +41,7 @@ class MoveableDeltaFlowTest {
 
     @Test
     fun `beginDrag returns false when canMove returns false`() = runTest {
-        val source = mutableDeltaFlowOf(listOf("A", "B", "C"))
+        val source = mutableDeltaListOf(listOf("A", "B", "C"))
         val moveable = source.moveable(
             canMove = { item, _, _ -> item != "B" },
             onMove = { _, _, _ -> true }
@@ -55,7 +55,7 @@ class MoveableDeltaFlowTest {
 
     @Test
     fun `updateDragPreview updates preview index`() = runTest {
-        val source = mutableDeltaFlowOf(listOf("A", "B", "C"))
+        val source = mutableDeltaListOf(listOf("A", "B", "C"))
         val moveable = source.moveable { _, _, _ -> true }
 
         moveable.first()
@@ -70,7 +70,7 @@ class MoveableDeltaFlowTest {
 
     @Test
     fun `updateDragPreview clamps to valid range`() = runTest {
-        val source = mutableDeltaFlowOf(listOf("A", "B", "C"))
+        val source = mutableDeltaListOf(listOf("A", "B", "C"))
         val moveable = source.moveable { _, _, _ -> true }
 
         moveable.first()
@@ -85,7 +85,7 @@ class MoveableDeltaFlowTest {
 
     @Test
     fun `cancelDrag returns to Idle`() = runTest {
-        val source = mutableDeltaFlowOf(listOf("A", "B", "C"))
+        val source = mutableDeltaListOf(listOf("A", "B", "C"))
         val moveable = source.moveable { _, _, _ -> true }
 
         moveable.first()
@@ -99,7 +99,7 @@ class MoveableDeltaFlowTest {
 
     @Test
     fun `commitDrag calls onMove and returns to Idle`() = runTest {
-        val source = mutableDeltaFlowOf(listOf("A", "B", "C"))
+        val source = mutableDeltaListOf(listOf("A", "B", "C"))
         var moveCallArgs: Triple<String, Int, Int>? = null
 
         val moveable = source.moveable { item, from, to ->
@@ -120,7 +120,7 @@ class MoveableDeltaFlowTest {
 
     @Test
     fun `commitDrag returns false when onMove fails`() = runTest {
-        val source = mutableDeltaFlowOf(listOf("A", "B", "C"))
+        val source = mutableDeltaListOf(listOf("A", "B", "C"))
         val moveable = source.moveable { _, _, _ -> false }
 
         moveable.first()
@@ -135,7 +135,7 @@ class MoveableDeltaFlowTest {
 
     @Test
     fun `commitDrag returns true without calling onMove when dropped in same position`() = runTest {
-        val source = mutableDeltaFlowOf(listOf("A", "B", "C"))
+        val source = mutableDeltaListOf(listOf("A", "B", "C"))
         var moveCalled = false
 
         val moveable = source.moveable { _, _, _ ->
@@ -156,7 +156,7 @@ class MoveableDeltaFlowTest {
 
     @Test
     fun `commitDrag handles exception from onMove`() = runTest {
-        val source = mutableDeltaFlowOf(listOf("A", "B", "C"))
+        val source = mutableDeltaListOf(listOf("A", "B", "C"))
         val moveable = source.moveable { _, _, _ ->
             throw RuntimeException("Network error")
         }
@@ -173,7 +173,7 @@ class MoveableDeltaFlowTest {
 
     @Test
     fun `cannot start new drag while one is in progress`() = runTest {
-        val source = mutableDeltaFlowOf(listOf("A", "B", "C"))
+        val source = mutableDeltaListOf(listOf("A", "B", "C"))
         val moveable = source.moveable { _, _, _ -> true }
 
         moveable.first()
@@ -188,9 +188,9 @@ class MoveableDeltaFlowTest {
 
     @Test
     fun `commitDrag shows Committing state during callback`() = runTest {
-        val source = mutableDeltaFlowOf(listOf("A", "B", "C"))
+        val source = mutableDeltaListOf(listOf("A", "B", "C"))
         val statesDuringCommit = mutableListOf<DragState<String>>()
-        lateinit var moveable: MoveableDeltaFlow<String>
+        lateinit var moveable: MoveableDeltaList<String>
 
         moveable = source.moveable { _, _, _ ->
             statesDuringCommit.add(moveable.dragState.value)
@@ -212,7 +212,7 @@ class MoveableDeltaFlowTest {
 
     @Test
     fun `upstream changes update currentItems`() = runTest {
-        val source = mutableDeltaFlowOf(listOf("A", "B"))
+        val source = mutableDeltaListOf(listOf("A", "B"))
         val moveable = source.moveable { _, _, _ -> true }
 
         // Initial collect

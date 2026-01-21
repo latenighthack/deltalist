@@ -43,7 +43,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
-import com.latenighthack.deltalist.DeltaFlow
+import com.latenighthack.deltalist.DeltaList
 import com.latenighthack.deltalist.Mutation
 import com.latenighthack.deltalist.StableLazyAccess
 import com.latenighthack.deltalist.demo.ui.theme.DeltaListDemoTheme
@@ -275,7 +275,7 @@ private fun ListControlButtons(
 
 // RecyclerView Adapter
 private class TickingItemAdapter(
-    private val deltaFlow: DeltaFlow<StableLazyAccess<TickingItem>>,
+    private val deltaFlow: DeltaList<StableLazyAccess<TickingItem>>,
     private val onItemClick: (Int) -> Unit
 ) : RecyclerView.Adapter<TickingItemAdapter.TickingItemViewHolder>() {
 

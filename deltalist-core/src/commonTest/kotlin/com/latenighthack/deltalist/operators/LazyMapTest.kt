@@ -4,7 +4,7 @@ import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
 import com.latenighthack.deltalist.LazyAccess
 import com.latenighthack.deltalist.Mutation
-import com.latenighthack.deltalist.mutableDeltaFlowOf
+import com.latenighthack.deltalist.mutableDeltaListOf
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
@@ -33,7 +33,7 @@ class LazyMapTest {
     @Test
     fun acquireComputesAndCachesValue() = runTest {
         resetTransformCount()
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c"))
         val lazy = source.lazyMapWithAccess { countingTransform(it) }
 
         val results = mutableListOf<Delta<LazyAccess<String>>>()
@@ -61,7 +61,7 @@ class LazyMapTest {
     @Test
     fun releaseFreesCache() = runTest {
         resetTransformCount()
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c"))
         val lazy = source.lazyMapWithAccess { countingTransform(it) }
 
         val results = mutableListOf<Delta<LazyAccess<String>>>()
@@ -89,7 +89,7 @@ class LazyMapTest {
     @Test
     fun multipleItemsCanBeAcquiredIndependently() = runTest {
         resetTransformCount()
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c", "d", "e"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c", "d", "e"))
         val lazy = source.lazyMapWithAccess { countingTransform(it) }
 
         val results = mutableListOf<Delta<LazyAccess<String>>>()
@@ -121,7 +121,7 @@ class LazyMapTest {
     @Test
     fun insertShiftsAcquiredIndicesUp() = runTest {
         resetTransformCount()
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c"))
         val lazy = source.lazyMapWithAccess { countingTransform(it) }
 
         val results = mutableListOf<Delta<LazyAccess<String>>>()
@@ -156,7 +156,7 @@ class LazyMapTest {
 
     @Test
     fun insertBeforeAcquiredItemPreservesCache() = runTest {
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c"))
         val lazy = source.lazyMapWithAccess { "t:$it" }
 
         val results = mutableListOf<Delta<LazyAccess<String>>>()
@@ -182,7 +182,7 @@ class LazyMapTest {
 
     @Test
     fun insertAfterAcquiredItemPreservesCache() = runTest {
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c"))
         val lazy = source.lazyMapWithAccess { "t:$it" }
 
         val results = mutableListOf<Delta<LazyAccess<String>>>()
@@ -208,7 +208,7 @@ class LazyMapTest {
 
     @Test
     fun removeDiscardsAcquiredItem() = runTest {
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c"))
         val lazy = source.lazyMapWithAccess { "t:$it" }
 
         val results = mutableListOf<Delta<LazyAccess<String>>>()
@@ -234,7 +234,7 @@ class LazyMapTest {
 
     @Test
     fun removeShiftsAcquiredIndicesDown() = runTest {
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c", "d"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c", "d"))
         val lazy = source.lazyMapWithAccess { "t:$it" }
 
         val results = mutableListOf<Delta<LazyAccess<String>>>()
@@ -263,7 +263,7 @@ class LazyMapTest {
 
     @Test
     fun removeMultipleItemsShiftsCorrectly() = runTest {
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c", "d", "e"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c", "d", "e"))
         val lazy = source.lazyMapWithAccess { "t:$it" }
 
         val results = mutableListOf<Delta<LazyAccess<String>>>()
@@ -291,7 +291,7 @@ class LazyMapTest {
     @Test
     fun updateRecomputesAcquiredItem() = runTest {
         resetTransformCount()
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c"))
         val lazy = source.lazyMapWithAccess { countingTransform(it) }
 
         val results = mutableListOf<Delta<LazyAccess<String>>>()
@@ -320,7 +320,7 @@ class LazyMapTest {
     @Test
     fun updateNonAcquiredItemDoesNotCompute() = runTest {
         resetTransformCount()
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c"))
         val lazy = source.lazyMapWithAccess { countingTransform(it) }
 
         val results = mutableListOf<Delta<LazyAccess<String>>>()
@@ -346,7 +346,7 @@ class LazyMapTest {
 
     @Test
     fun moveAcquiredItemForward() = runTest {
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c", "d"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c", "d"))
         val lazy = source.lazyMapWithAccess { "t:$it" }
 
         val results = mutableListOf<Delta<LazyAccess<String>>>()
@@ -375,7 +375,7 @@ class LazyMapTest {
 
     @Test
     fun moveAcquiredItemBackward() = runTest {
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c", "d"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c", "d"))
         val lazy = source.lazyMapWithAccess { "t:$it" }
 
         val results = mutableListOf<Delta<LazyAccess<String>>>()
@@ -403,7 +403,7 @@ class LazyMapTest {
 
     @Test
     fun moveAffectsIntermediateAcquiredItems() = runTest {
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c", "d", "e"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c", "d", "e"))
         val lazy = source.lazyMapWithAccess { "t:$it" }
 
         val results = mutableListOf<Delta<LazyAccess<String>>>()
@@ -430,7 +430,7 @@ class LazyMapTest {
 
     @Test
     fun reloadClearsAllAcquiredItems() = runTest {
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c"))
         val lazy = source.lazyMapWithAccess { "t:$it" }
 
         val results = mutableListOf<Delta<LazyAccess<String>>>()
@@ -457,7 +457,7 @@ class LazyMapTest {
 
     @Test
     fun multipleSequentialMutationsTrackCorrectly() = runTest {
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c", "d", "e"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c", "d", "e"))
         val lazy = source.lazyMapWithAccess { "t:$it" }
 
         val results = mutableListOf<Delta<LazyAccess<String>>>()
@@ -492,7 +492,7 @@ class LazyMapTest {
 
     @Test
     fun batchMutationsTrackCorrectly() = runTest {
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c", "d", "e"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c", "d", "e"))
         val lazy = source.lazyMapWithAccess { "t:$it" }
 
         val results = mutableListOf<Delta<LazyAccess<String>>>()
@@ -529,7 +529,7 @@ class LazyMapTest {
         // Use a class instance to verify same object identity
         data class Wrapper(val value: String)
 
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c"))
         val lazy = source.lazyMapWithAccess { Wrapper(it) }
 
         val results = mutableListOf<Delta<LazyAccess<Wrapper>>>()
@@ -555,7 +555,7 @@ class LazyMapTest {
     fun differentObjectAfterReleaseAndReacquire() = runTest {
         data class Wrapper(val value: String)
 
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c"))
         val lazy = source.lazyMapWithAccess { Wrapper(it) }
 
         val results = mutableListOf<Delta<LazyAccess<Wrapper>>>()
@@ -582,7 +582,7 @@ class LazyMapTest {
 
     @Test
     fun emptyListHandledCorrectly() = runTest {
-        val source = mutableDeltaFlowOf<String>(emptyList())
+        val source = mutableDeltaListOf<String>(emptyList())
         val lazy = source.lazyMapWithAccess { "t:$it" }
 
         val results = mutableListOf<Delta<LazyAccess<String>>>()
@@ -605,7 +605,7 @@ class LazyMapTest {
 
     @Test
     fun acquireAfterMutationWorksCorrectly() = runTest {
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c"))
         val lazy = source.lazyMapWithAccess { "t:$it" }
 
         var latestDelta: Delta<LazyAccess<String>>? = null
@@ -629,7 +629,7 @@ class LazyMapTest {
 
     @Test
     fun concurrentAcquiresOnSameIndex() = runTest {
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c"))
         val lazy = source.lazyMapWithAccess { "t:$it" }
 
         var latestDelta: Delta<LazyAccess<String>>? = null
@@ -656,7 +656,7 @@ class LazyMapTest {
 
     @Test
     fun concurrentAcquireAndRelease() = runTest {
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c"))
         val lazy = source.lazyMapWithAccess { "t:$it" }
 
         var latestDelta: Delta<LazyAccess<String>>? = null
@@ -686,7 +686,7 @@ class LazyMapTest {
     @Test
     fun acquireDuringDeltaApplication() = runTest {
         resetTransformCount()
-        val source = mutableDeltaFlowOf(listOf("a", "b", "c", "d", "e"))
+        val source = mutableDeltaListOf(listOf("a", "b", "c", "d", "e"))
         val lazy = source.lazyMapWithAccess { countingTransform(it) }
 
         var latestDelta: Delta<LazyAccess<String>>? = null
@@ -728,7 +728,7 @@ class LazyMapTest {
 
     @Test
     fun stressTestConcurrentOperations() = runTest {
-        val source = mutableDeltaFlowOf((0..99).map { "item$it" })
+        val source = mutableDeltaListOf((0..99).map { "item$it" })
         val lazy = source.lazyMapWithAccess { "t:$it" }
 
         var latestDelta: Delta<LazyAccess<String>>? = null

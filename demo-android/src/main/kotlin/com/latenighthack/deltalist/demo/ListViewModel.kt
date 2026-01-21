@@ -1,8 +1,8 @@
 package com.latenighthack.deltalist.demo
 
-import com.latenighthack.deltalist.DeltaFlow
+import com.latenighthack.deltalist.DeltaList
 import com.latenighthack.deltalist.StableLazyAccess
-import com.latenighthack.deltalist.mutableDeltaFlowOf
+import com.latenighthack.deltalist.mutableDeltaListOf
 import com.latenighthack.deltalist.operators.lazyMapWithAccess
 import com.latenighthack.deltalist.operators.withStableLazyIds
 import kotlinx.coroutines.CoroutineScope
@@ -11,12 +11,12 @@ import kotlinx.coroutines.SupervisorJob
 import java.util.UUID
 
 class ListViewModel {
-    private val _items = mutableDeltaFlowOf<Item>()
-    val items: DeltaFlow<Item> = _items
+    private val _items = mutableDeltaListOf<Item>()
+    val items: DeltaList<Item> = _items
 
     private val tickingScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    val tickingItems: DeltaFlow<StableLazyAccess<TickingItem>> = _items
+    val tickingItems: DeltaList<StableLazyAccess<TickingItem>> = _items
         .lazyMapWithAccess { item -> TickingItem(item, tickingScope) }
         .withStableLazyIds()
 

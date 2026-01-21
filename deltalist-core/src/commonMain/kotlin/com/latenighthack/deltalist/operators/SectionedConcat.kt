@@ -8,10 +8,10 @@ import kotlinx.coroutines.flow.*
  * Each flow becomes a logical "section" for mutation tracking purposes,
  * but the result is a flat list.
  */
-fun <T> concatSections(vararg flows: DeltaFlow<T>): DeltaFlow<T> =
+fun <T> concatSections(vararg flows: DeltaList<T>): DeltaList<T> =
     concatSections(flows.toList())
 
-fun <T> concatSections(flows: List<DeltaFlow<T>>): DeltaFlow<T> {
+fun <T> concatSections(flows: List<DeltaList<T>>): DeltaList<T> {
     if (flows.isEmpty()) return flowOf(Delta(emptyList(), Change.Reload))
     if (flows.size == 1) return flows[0]
 
@@ -56,7 +56,7 @@ fun <T> concatSections(flows: List<DeltaFlow<T>>): DeltaFlow<T> {
 /**
  * Extension to concatenate a list of delta flows.
  */
-fun <T> List<DeltaFlow<T>>.concat(): DeltaFlow<T> = concatSections(this)
+fun <T> List<DeltaList<T>>.concat(): DeltaList<T> = concatSections(this)
 
 /**
  * Lazy list that concatenates multiple lists.
@@ -80,13 +80,13 @@ internal class ConcatenatedMultiList<T>(
  * Creates a sectioned delta flow from multiple delta flows.
  * Each input flow becomes a section with the given header.
  */
-fun <S, T> sectionedDeltaFlow(
-    vararg sections: Pair<S, DeltaFlow<T>>
-): SectionedDeltaFlow<S, T> = sectionedDeltaFlow(sections.toList())
+fun <S, T> sectionedDeltaList(
+    vararg sections: Pair<S, DeltaList<T>>
+): SectionedDeltaList<S, T> = sectionedDeltaList(sections.toList())
 
-fun <S, T> sectionedDeltaFlow(
-    sections: List<Pair<S, DeltaFlow<T>>>
-): SectionedDeltaFlow<S, T> {
+fun <S, T> sectionedDeltaList(
+    sections: List<Pair<S, DeltaList<T>>>
+): SectionedDeltaList<S, T> {
     if (sections.isEmpty()) {
         return flowOf(SectionedDelta(emptyList(), SectionedChange.Reload))
     }

@@ -18,7 +18,7 @@ class DiffTest {
     @Test
     fun diffInitialEmissionIsReload() = runTest {
         val source = MutableStateFlow(listOf(Item("1", "A"), Item("2", "B")))
-        val deltaFlow = source.asDeltaFlow { it.id }
+        val deltaFlow = source.asDeltaList { it.id }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {
@@ -36,7 +36,7 @@ class DiffTest {
     @Test
     fun diffSingleInsertAtEnd() = runTest {
         val source = MutableStateFlow(listOf(Item("1", "A"), Item("2", "B")))
-        val deltaFlow = source.asDeltaFlow { it.id }
+        val deltaFlow = source.asDeltaList { it.id }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {
@@ -60,7 +60,7 @@ class DiffTest {
     @Test
     fun diffSingleInsertAtStart() = runTest {
         val source = MutableStateFlow(listOf(Item("1", "A"), Item("2", "B")))
-        val deltaFlow = source.asDeltaFlow { it.id }
+        val deltaFlow = source.asDeltaList { it.id }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {
@@ -84,7 +84,7 @@ class DiffTest {
     @Test
     fun diffSingleInsertInMiddle() = runTest {
         val source = MutableStateFlow(listOf(Item("1", "A"), Item("3", "C")))
-        val deltaFlow = source.asDeltaFlow { it.id }
+        val deltaFlow = source.asDeltaList { it.id }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {
@@ -108,7 +108,7 @@ class DiffTest {
     @Test
     fun diffMultipleConsecutiveInserts() = runTest {
         val source = MutableStateFlow(listOf(Item("1", "A")))
-        val deltaFlow = source.asDeltaFlow { it.id }
+        val deltaFlow = source.asDeltaList { it.id }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {
@@ -133,7 +133,7 @@ class DiffTest {
     @Test
     fun diffSingleRemoveFromEnd() = runTest {
         val source = MutableStateFlow(listOf(Item("1", "A"), Item("2", "B"), Item("3", "C")))
-        val deltaFlow = source.asDeltaFlow { it.id }
+        val deltaFlow = source.asDeltaList { it.id }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {
@@ -157,7 +157,7 @@ class DiffTest {
     @Test
     fun diffSingleRemoveFromStart() = runTest {
         val source = MutableStateFlow(listOf(Item("1", "A"), Item("2", "B"), Item("3", "C")))
-        val deltaFlow = source.asDeltaFlow { it.id }
+        val deltaFlow = source.asDeltaList { it.id }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {
@@ -181,7 +181,7 @@ class DiffTest {
     @Test
     fun diffSingleRemoveFromMiddle() = runTest {
         val source = MutableStateFlow(listOf(Item("1", "A"), Item("2", "B"), Item("3", "C")))
-        val deltaFlow = source.asDeltaFlow { it.id }
+        val deltaFlow = source.asDeltaList { it.id }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {
@@ -205,7 +205,7 @@ class DiffTest {
     @Test
     fun diffSingleUpdate() = runTest {
         val source = MutableStateFlow(listOf(Item("1", "A"), Item("2", "B")))
-        val deltaFlow = source.asDeltaFlow { it.id }
+        val deltaFlow = source.asDeltaList { it.id }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {
@@ -229,7 +229,7 @@ class DiffTest {
     @Test
     fun diffMultipleUpdates() = runTest {
         val source = MutableStateFlow(listOf(Item("1", "A"), Item("2", "B"), Item("3", "C")))
-        val deltaFlow = source.asDeltaFlow { it.id }
+        val deltaFlow = source.asDeltaList { it.id }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {
@@ -255,7 +255,7 @@ class DiffTest {
     @Test
     fun diffSimpleMove() = runTest {
         val source = MutableStateFlow(listOf(Item("1", "A"), Item("2", "B"), Item("3", "C")))
-        val deltaFlow = source.asDeltaFlow { it.id }
+        val deltaFlow = source.asDeltaList { it.id }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {
@@ -278,7 +278,7 @@ class DiffTest {
     @Test
     fun diffSwapTwoItems() = runTest {
         val source = MutableStateFlow(listOf(Item("1", "A"), Item("2", "B")))
-        val deltaFlow = source.asDeltaFlow { it.id }
+        val deltaFlow = source.asDeltaList { it.id }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {
@@ -307,7 +307,7 @@ class DiffTest {
             Item("C", "Charlie"),
             Item("D", "Delta")
         ))
-        val deltaFlow = source.asDeltaFlow { it.id }
+        val deltaFlow = source.asDeltaList { it.id }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {
@@ -340,7 +340,7 @@ class DiffTest {
     @Test
     fun diffEmptyToPopulated() = runTest {
         val source = MutableStateFlow(emptyList<Item>())
-        val deltaFlow = source.asDeltaFlow { it.id }
+        val deltaFlow = source.asDeltaList { it.id }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {
@@ -365,7 +365,7 @@ class DiffTest {
     @Test
     fun diffPopulatedToEmpty() = runTest {
         val source = MutableStateFlow(listOf(Item("1", "A"), Item("2", "B")))
-        val deltaFlow = source.asDeltaFlow { it.id }
+        val deltaFlow = source.asDeltaList { it.id }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {
@@ -388,7 +388,7 @@ class DiffTest {
     @Test
     fun diffMultipleEmissions() = runTest {
         val source = MutableStateFlow(listOf(Item("1", "A")))
-        val deltaFlow = source.asDeltaFlow { it.id }
+        val deltaFlow = source.asDeltaList { it.id }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {
@@ -422,7 +422,7 @@ class DiffTest {
             Item("3", "C"),
             Item("4", "D")
         ))
-        val deltaFlow = source.asDeltaFlow { it.id }
+        val deltaFlow = source.asDeltaList { it.id }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {
@@ -450,7 +450,7 @@ class DiffTest {
     @Test
     fun diffRemoveAndInsertSamePosition() = runTest {
         val source = MutableStateFlow(listOf(Item("1", "A"), Item("2", "B")))
-        val deltaFlow = source.asDeltaFlow { it.id }
+        val deltaFlow = source.asDeltaList { it.id }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {

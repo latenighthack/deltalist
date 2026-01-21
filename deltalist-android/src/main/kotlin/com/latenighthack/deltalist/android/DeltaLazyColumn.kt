@@ -10,11 +10,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
-import com.latenighthack.deltalist.DeltaFlow
+import com.latenighthack.deltalist.DeltaList
 
 @Composable
 fun <T> DeltaLazyColumn(
-    deltaFlow: DeltaFlow<T>,
+    deltaFlow: DeltaList<T>,
     modifier: Modifier = Modifier,
     key: ((T) -> Any)? = null,
     content: @Composable LazyItemScope.(T) -> Unit
@@ -33,7 +33,7 @@ fun <T> DeltaLazyColumn(
 
 @Composable
 fun <T> DeltaLazyColumn(
-    deltaFlow: DeltaFlow<T>,
+    deltaFlow: DeltaList<T>,
     modifier: Modifier = Modifier,
     key: ((T) -> Any)? = null,
     contentType: (T) -> Any? = { null },

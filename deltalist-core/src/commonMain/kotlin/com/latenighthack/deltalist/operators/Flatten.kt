@@ -12,11 +12,11 @@ import kotlinx.coroutines.flow.flow
  * @param item Mapper to create a row from each item.
  * @param footer Optional mapper to create a footer row from section header and items.
  */
-fun <S, T, R> SectionedDeltaFlow<S, T>.flatten(
+fun <S, T, R> SectionedDeltaList<S, T>.flatten(
     header: ((S) -> R)? = null,
     item: (T) -> R,
     footer: ((S, List<T>) -> R)? = null
-): DeltaFlow<R> = flow {
+): DeltaList<R> = flow {
     var previousSections: List<Section<S, T>> = emptyList()
 
     collect { delta ->
@@ -74,7 +74,7 @@ fun <S, T, R> SectionedDeltaFlow<S, T>.flatten(
 /**
  * Flattens sections into just items, no headers or footers.
  */
-fun <S, T> SectionedDeltaFlow<S, T>.flattenItems(): DeltaFlow<T> = flow {
+fun <S, T> SectionedDeltaList<S, T>.flattenItems(): DeltaList<T> = flow {
     var previousSections: List<Section<S, T>> = emptyList()
 
     collect { delta ->

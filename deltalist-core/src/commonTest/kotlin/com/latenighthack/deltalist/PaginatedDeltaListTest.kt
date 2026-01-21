@@ -20,7 +20,7 @@ class PaginatedDeltaFlowTest {
     fun initialEmissionIsReloadWithEstimatedSize() = runTest {
         var initialDirection: LoadDirection? = null
 
-        val flow = paginatedDeltaFlow<Item, String>(
+        val flow = paginatedDeltaList<Item, String>(
             scope = this,
             startToken = "page1",
             fetch = { direction, token ->
@@ -57,7 +57,7 @@ class PaginatedDeltaFlowTest {
     fun fetchDirectionIsInitialOnFirstLoad() = runTest {
         var receivedDirection: LoadDirection? = null
 
-        val flow = paginatedDeltaFlow<Item, String>(
+        val flow = paginatedDeltaList<Item, String>(
             scope = this,
             startToken = "start",
             fetch = { direction, token ->
@@ -88,7 +88,7 @@ class PaginatedDeltaFlowTest {
         var fetchCount = 0
         var lastDirection: LoadDirection? = null
 
-        val flow = paginatedDeltaFlow<Item, Int>(
+        val flow = paginatedDeltaList<Item, Int>(
             scope = this,
             startToken = 0,
             fetchWindowSize = 1,
@@ -133,7 +133,7 @@ class PaginatedDeltaFlowTest {
         var fetchCount = 0
         var lastDirection: LoadDirection? = null
 
-        val flow = paginatedDeltaFlow<Item, Int>(
+        val flow = paginatedDeltaList<Item, Int>(
             scope = this,
             startToken = 5,
             fetchWindowSize = 1,
@@ -184,7 +184,7 @@ class PaginatedDeltaFlowTest {
     fun fetchWindowSizeMultipleItems() = runTest {
         var afterFetchCalled = false
 
-        val flow = paginatedDeltaFlow<Item, Int>(
+        val flow = paginatedDeltaList<Item, Int>(
             scope = this,
             startToken = 0,
             fetchWindowSize = 3,
@@ -227,7 +227,7 @@ class PaginatedDeltaFlowTest {
     fun accessOutsideFetchWindowDoesNotTriggerFetch() = runTest {
         var fetchCount = 0
 
-        val flow = paginatedDeltaFlow<Item, Int>(
+        val flow = paginatedDeltaList<Item, Int>(
             scope = this,
             startToken = 0,
             fetchWindowSize = 1,
@@ -261,7 +261,7 @@ class PaginatedDeltaFlowTest {
 
     @Test
     fun estimatedSizeReportsLargerSize() = runTest {
-        val flow = paginatedDeltaFlow<Item, String>(
+        val flow = paginatedDeltaList<Item, String>(
             scope = this,
             startToken = "initial",
             fetch = { direction, token ->
@@ -289,7 +289,7 @@ class PaginatedDeltaFlowTest {
     @Test
     fun insertMutationWhenExceedingEstimatedSize() = runTest {
         var page = 0
-        val flow = paginatedDeltaFlow<Item, Int>(
+        val flow = paginatedDeltaList<Item, Int>(
             scope = this,
             startToken = 0,
             fetchWindowSize = 1,
@@ -341,7 +341,7 @@ class PaginatedDeltaFlowTest {
     @Test
     fun updateMutationWhenWithinEstimatedSize() = runTest {
         var page = 0
-        val flow = paginatedDeltaFlow<Item, Int>(
+        val flow = paginatedDeltaList<Item, Int>(
             scope = this,
             startToken = 0,
             fetchWindowSize = 1,
@@ -387,7 +387,7 @@ class PaginatedDeltaFlowTest {
 
     @Test
     fun prependAlwaysInserts() = runTest {
-        val flow = paginatedDeltaFlow<Item, Int>(
+        val flow = paginatedDeltaList<Item, Int>(
             scope = this,
             startToken = 5,
             fetchWindowSize = 1,
@@ -435,7 +435,7 @@ class PaginatedDeltaFlowTest {
     fun noDoubleFetchWhileLoading() = runTest {
         var fetchCount = 0
 
-        val flow = paginatedDeltaFlow<Item, String>(
+        val flow = paginatedDeltaList<Item, String>(
             scope = this,
             startToken = "initial",
             fetchWindowSize = 1,
@@ -471,7 +471,7 @@ class PaginatedDeltaFlowTest {
     @Test
     fun emptyPageDoesNotEmitMutation() = runTest {
         var page = 0
-        val flow = paginatedDeltaFlow<Item, Int>(
+        val flow = paginatedDeltaList<Item, Int>(
             scope = this,
             startToken = 0,
             fetchWindowSize = 1,
@@ -513,7 +513,7 @@ class PaginatedDeltaFlowTest {
 
     @Test
     fun accessBeyondLoadedItemsThrows() = runTest {
-        val flow = paginatedDeltaFlow<Item, String>(
+        val flow = paginatedDeltaList<Item, String>(
             scope = this,
             startToken = "initial",
             fetch = { direction, token ->
@@ -546,7 +546,7 @@ class PaginatedDeltaFlowTest {
 
     @Test
     fun negativeIndexThrows() = runTest {
-        val flow = paginatedDeltaFlow<Item, String>(
+        val flow = paginatedDeltaList<Item, String>(
             scope = this,
             startToken = "initial",
             fetch = { direction, token ->
@@ -576,7 +576,7 @@ class PaginatedDeltaFlowTest {
     fun multipleSequentialFetches() = runTest {
         var page = 0
 
-        val flow = paginatedDeltaFlow<Item, Int>(
+        val flow = paginatedDeltaList<Item, Int>(
             scope = this,
             startToken = 0,
             fetchWindowSize = 1,
@@ -614,7 +614,7 @@ class PaginatedDeltaFlowTest {
     fun loadDirectionPassedCorrectly() = runTest {
         val directions = mutableListOf<LoadDirection>()
 
-        val flow = paginatedDeltaFlow<Item, Int>(
+        val flow = paginatedDeltaList<Item, Int>(
             scope = this,
             startToken = 5,
             fetchWindowSize = 1,
@@ -665,7 +665,7 @@ class PaginatedDeltaFlowTest {
     fun callerCanManageLoadingState() = runTest {
         val loadingState = MutableStateFlow<LoadDirection?>(null)
 
-        val flow = paginatedDeltaFlow<Item, String>(
+        val flow = paginatedDeltaList<Item, String>(
             scope = this,
             startToken = "initial",
             fetch = { direction, token ->
@@ -699,7 +699,7 @@ class PaginatedDeltaFlowTest {
 
     @Test
     fun softGetReturnsLoadedItems() = runTest {
-        val flow = paginatedDeltaFlow<Item, String>(
+        val flow = paginatedDeltaList<Item, String>(
             scope = this,
             startToken = "initial",
             fetch = { direction, token ->
@@ -736,7 +736,7 @@ class PaginatedDeltaFlowTest {
 
     @Test
     fun softGetReturnsNotLoadedForUnloadedItems() = runTest {
-        val flow = paginatedDeltaFlow<Item, String>(
+        val flow = paginatedDeltaList<Item, String>(
             scope = this,
             startToken = "initial",
             fetch = { direction, token ->
@@ -770,7 +770,7 @@ class PaginatedDeltaFlowTest {
 
     @Test
     fun softGetReturnsNullForOutOfBounds() = runTest {
-        val flow = paginatedDeltaFlow<Item, String>(
+        val flow = paginatedDeltaList<Item, String>(
             scope = this,
             startToken = "initial",
             fetch = { direction, token ->
@@ -804,7 +804,7 @@ class PaginatedDeltaFlowTest {
     fun softGetDoesNotTriggerFetch() = runTest {
         var fetchCount = 0
 
-        val flow = paginatedDeltaFlow<Item, String>(
+        val flow = paginatedDeltaList<Item, String>(
             scope = this,
             startToken = "initial",
             fetchWindowSize = 1,

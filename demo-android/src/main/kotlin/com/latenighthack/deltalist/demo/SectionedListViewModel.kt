@@ -1,10 +1,10 @@
 package com.latenighthack.deltalist.demo
 
-import com.latenighthack.deltalist.DeltaFlow
-import com.latenighthack.deltalist.MutableSectionedDeltaFlow
+import com.latenighthack.deltalist.DeltaList
+import com.latenighthack.deltalist.MutableSectionedDeltaList
 import com.latenighthack.deltalist.Section
-import com.latenighthack.deltalist.SectionedDeltaFlow
-import com.latenighthack.deltalist.mutableSectionedDeltaFlowOf
+import com.latenighthack.deltalist.SectionedDeltaList
+import com.latenighthack.deltalist.mutableSectionedDeltaListOf
 import com.latenighthack.deltalist.operators.flatten
 import java.util.UUID
 
@@ -24,7 +24,7 @@ class SectionedListViewModel {
         0xFFBA68C8  // Purple
     )
 
-    private val _sections: MutableSectionedDeltaFlow<SectionHeader, Item> = mutableSectionedDeltaFlowOf(
+    private val _sections: MutableSectionedDeltaList<SectionHeader, Item> = mutableSectionedDeltaListOf(
         listOf(
             Section(
                 SectionHeader("Favorites", sectionColors[0]),
@@ -51,9 +51,9 @@ class SectionedListViewModel {
         )
     )
 
-    val sections: SectionedDeltaFlow<SectionHeader, Item> = _sections
+    val sections: SectionedDeltaList<SectionHeader, Item> = _sections
 
-    val flattenedSections: DeltaFlow<SectionRow> = _sections.flatten(
+    val flattenedSections: DeltaList<SectionRow> = _sections.flatten(
         header = { SectionRow.Header(it) },
         item = { SectionRow.ItemRow(it) }
     )

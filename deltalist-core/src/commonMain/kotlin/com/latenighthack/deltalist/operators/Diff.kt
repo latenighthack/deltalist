@@ -2,7 +2,7 @@ package com.latenighthack.deltalist.operators
 
 import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
-import com.latenighthack.deltalist.DeltaFlow
+import com.latenighthack.deltalist.DeltaList
 import com.latenighthack.deltalist.Mutation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -10,10 +10,10 @@ import kotlinx.coroutines.flow.flow
 /**
  * Convenience method for self-keyed items
  */
-fun <T> Flow<List<T>>.asDeltaFlow(): DeltaFlow<T> = asDeltaFlow { it }
+fun <T> Flow<List<T>>.asDeltaList(): DeltaList<T> = asDeltaList { it }
 
 /**
- * Converts a Flow<List<T>> to a DeltaFlow<T> by automatically computing the
+ * Converts a Flow<List<T>> to a DeltaList<T> by automatically computing the
  * difference between consecutive list emissions.
  *
  * The [idSelector] function extracts a stable identifier from each item.
@@ -29,10 +29,10 @@ fun <T> Flow<List<T>>.asDeltaFlow(): DeltaFlow<T> = asDeltaFlow { it }
  * data class Contact(val contactId: String, val name: String, val phone: String)
  *
  * val contactsFlow: Flow<List<Contact>> = ...
- * val deltaFlow: DeltaFlow<Contact> = contactsFlow.asDeltaFlow { it.contactId }
+ * val deltaFlow: DeltaList<Contact> = contactsFlow.asDeltaList { it.contactId }
  * ```
  */
-fun <T, ID> Flow<List<T>>.asDeltaFlow(idSelector: (T) -> ID): DeltaFlow<T> = flow {
+fun <T, ID> Flow<List<T>>.asDeltaList(idSelector: (T) -> ID): DeltaList<T> = flow {
     var previousItems: List<T>? = null
 
     collect { currentItems ->

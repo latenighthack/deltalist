@@ -41,7 +41,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
-import com.latenighthack.deltalist.DeltaFlow
+import com.latenighthack.deltalist.DeltaList
 import com.latenighthack.deltalist.Mutation
 import com.latenighthack.deltalist.demo.ui.theme.DeltaListDemoTheme
 import kotlinx.coroutines.Job
@@ -347,7 +347,7 @@ private fun SectionedControlButtons(
 
 // RecyclerView Adapter
 private class SectionedAdapter(
-    private val deltaFlow: DeltaFlow<SectionRow>,
+    private val deltaFlow: DeltaList<SectionRow>,
     private val onSectionClick: (Int) -> Unit
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 

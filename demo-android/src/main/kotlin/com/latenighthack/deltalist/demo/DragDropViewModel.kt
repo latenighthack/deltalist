@@ -1,13 +1,13 @@
 package com.latenighthack.deltalist.demo
 
-import com.latenighthack.deltalist.MoveableDeltaFlow
-import com.latenighthack.deltalist.mutableDeltaFlowOf
+import com.latenighthack.deltalist.MoveableDeltaList
+import com.latenighthack.deltalist.mutableDeltaListOf
 import com.latenighthack.deltalist.moveable
 import kotlinx.coroutines.delay
 import java.util.UUID
 
 class DragDropViewModel {
-    private val _items = mutableDeltaFlowOf(
+    private val _items = mutableDeltaListOf(
         (1..10).map { Item(UUID.randomUUID().toString(), "Item $it") }
     )
 
@@ -15,7 +15,7 @@ class DragDropViewModel {
      * Moveable flow that simulates persisting moves with a small delay.
      * In a real app, onMove would save to a database or API.
      */
-    val items: MoveableDeltaFlow<Item> = _items.moveable(
+    val items: MoveableDeltaList<Item> = _items.moveable(
         canMove = { item, _, _ ->
             // Example: items with "Pinned" in title can't be moved
             !item.title.contains("Pinned")

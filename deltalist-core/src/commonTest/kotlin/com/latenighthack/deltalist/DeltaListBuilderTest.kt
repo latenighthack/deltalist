@@ -14,7 +14,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun initialEmissionIsReload() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"), Item("2", "B"))) { }
+        val flow = deltaList(listOf(Item("1", "A"), Item("2", "B"))) { }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {
@@ -31,7 +31,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun emptyInitialEmissionIsReload() = runTest {
-        val flow = deltaFlow<Item> { }
+        val flow = deltaList<Item> { }
 
         val results = mutableListOf<Delta<Item>>()
         val job = launch {
@@ -48,7 +48,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun addEmitsImmediately() = runTest {
-        val flow = deltaFlow<Item> { list ->
+        val flow = deltaList<Item> { list ->
             list.add(Item("1", "A"))
             list.add(Item("2", "B"))
         }
@@ -83,7 +83,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun batchGroupsMutations() = runTest {
-        val flow = deltaFlow<Item> { list ->
+        val flow = deltaList<Item> { list ->
             list.batch {
                 add(Item("1", "A"))
                 add(Item("2", "B"))
@@ -113,7 +113,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun removeEmitsImmediately() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"), Item("2", "B"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"), Item("2", "B"))) { list ->
             list.removeAt(0)
         }
 
@@ -136,7 +136,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun setEmitsUpdate() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"))) { list ->
             list.set(0, Item("1", "A-Updated"))
         }
 
@@ -159,7 +159,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun moveEmitsMove() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"), Item("2", "B"), Item("3", "C"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"), Item("2", "B"), Item("3", "C"))) { list ->
             list.move(0, 2)
         }
 
@@ -183,7 +183,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun clearEmitsRemove() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"), Item("2", "B"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"), Item("2", "B"))) { list ->
             list.clear()
         }
 
@@ -207,7 +207,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun reloadEmitsReload() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"))) { list ->
             list.reload(listOf(Item("2", "B"), Item("3", "C")))
         }
 
@@ -229,7 +229,7 @@ class DeltaFlowBuilderTest {
     fun reactToExternalFlow() = runTest {
         val events = MutableSharedFlow<String>()
 
-        val flow = deltaFlow<Item> { list ->
+        val flow = deltaList<Item> { list ->
             events.collect { event ->
                 when {
                     event.startsWith("add:") -> {
@@ -271,7 +271,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun listIsReadableDuringMutations() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"))) { list ->
             // Can read list before mutation
             assertEquals(1, list.size)
             assertEquals(Item("1", "A"), list[0])
@@ -296,7 +296,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun batchWithMixedOperations() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"), Item("2", "B"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"), Item("2", "B"))) { list ->
             list.batch {
                 add(Item("3", "C"))
                 removeAt(0)
@@ -324,7 +324,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun addAtIndexEmitsInsert() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"), Item("3", "C"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"), Item("3", "C"))) { list ->
             list.add(1, Item("2", "B"))
         }
 
@@ -348,7 +348,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun addAllEmitsInsert() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"))) { list ->
             list.addAll(listOf(Item("2", "B"), Item("3", "C")))
         }
 
@@ -372,7 +372,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun addAllAtIndexEmitsInsert() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"), Item("4", "D"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"), Item("4", "D"))) { list ->
             list.addAll(1, listOf(Item("2", "B"), Item("3", "C")))
         }
 
@@ -396,7 +396,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun addAllEmptyCollectionNoEmission() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"))) { list ->
             list.addAll(emptyList())
         }
 
@@ -415,7 +415,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun removeByElementEmitsRemove() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"), Item("2", "B"), Item("3", "C"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"), Item("2", "B"), Item("3", "C"))) { list ->
             val removed = list.remove(Item("2", "B"))
             assertTrue(removed)
         }
@@ -439,7 +439,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun removeNonExistentElementNoEmission() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"))) { list ->
             val removed = list.remove(Item("999", "NotFound"))
             assertTrue(!removed)
         }
@@ -458,7 +458,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun clearEmptyListNoEmission() = runTest {
-        val flow = deltaFlow<Item> { list ->
+        val flow = deltaList<Item> { list ->
             list.clear()
         }
 
@@ -476,7 +476,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun moveSameIndexNoEmission() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"), Item("2", "B"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"), Item("2", "B"))) { list ->
             list.move(0, 0)
         }
 
@@ -494,7 +494,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun batchWithMoveOperation() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"), Item("2", "B"), Item("3", "C"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"), Item("2", "B"), Item("3", "C"))) { list ->
             list.batch {
                 move(0, 2)
             }
@@ -520,7 +520,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun emptyBatchNoEmission() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"))) { list ->
             list.batch {
                 // No operations
             }
@@ -540,7 +540,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun multipleBatchesInSequence() = runTest {
-        val flow = deltaFlow<Item> { list ->
+        val flow = deltaList<Item> { list ->
             list.batch {
                 add(Item("1", "A"))
                 add(Item("2", "B"))
@@ -574,7 +574,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun mixImmediateAndBatchedOperations() = runTest {
-        val flow = deltaFlow<Item> { list ->
+        val flow = deltaList<Item> { list ->
             list.add(Item("1", "A"))  // Immediate
             list.batch {
                 add(Item("2", "B"))
@@ -614,7 +614,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun listContainsWorks() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"), Item("2", "B"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"), Item("2", "B"))) { list ->
             assertTrue(list.contains(Item("1", "A")))
             assertTrue(!list.contains(Item("999", "NotFound")))
         }
@@ -632,7 +632,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun listIndexOfWorks() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"), Item("2", "B"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"), Item("2", "B"))) { list ->
             assertEquals(0, list.indexOf(Item("1", "A")))
             assertEquals(1, list.indexOf(Item("2", "B")))
             assertEquals(-1, list.indexOf(Item("999", "NotFound")))
@@ -651,7 +651,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun listIterationWorks() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"), Item("2", "B"), Item("3", "C"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"), Item("2", "B"), Item("3", "C"))) { list ->
             val collected = mutableListOf<Item>()
             for (item in list) {
                 collected.add(item)
@@ -673,7 +673,7 @@ class DeltaFlowBuilderTest {
     @Test
     fun setReturnsOldValue() = runTest {
         var oldValue: Item? = null
-        val flow = deltaFlow(listOf(Item("1", "A"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"))) { list ->
             oldValue = list.set(0, Item("1", "A-Updated"))
         }
 
@@ -691,7 +691,7 @@ class DeltaFlowBuilderTest {
     @Test
     fun removeAtReturnsRemovedElement() = runTest {
         var removed: Item? = null
-        val flow = deltaFlow(listOf(Item("1", "A"), Item("2", "B"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"), Item("2", "B"))) { list ->
             removed = list.removeAt(0)
         }
 
@@ -708,7 +708,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun batchClearAndRepopulate() = runTest {
-        val flow = deltaFlow(listOf(Item("1", "A"), Item("2", "B"))) { list ->
+        val flow = deltaList(listOf(Item("1", "A"), Item("2", "B"))) { list ->
             list.batch {
                 clear()
                 add(Item("3", "C"))
@@ -738,7 +738,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun reloadAfterMutations() = runTest {
-        val flow = deltaFlow<Item> { list ->
+        val flow = deltaList<Item> { list ->
             list.add(Item("1", "A"))
             list.add(Item("2", "B"))
             list.reload(listOf(Item("X", "New"), Item("Y", "List")))
@@ -769,7 +769,7 @@ class DeltaFlowBuilderTest {
 
     @Test
     fun batchAddAllVariants() = runTest {
-        val flow = deltaFlow<Item> { list ->
+        val flow = deltaList<Item> { list ->
             list.batch {
                 addAll(listOf(Item("1", "A"), Item("2", "B")))
                 addAll(1, listOf(Item("X", "Middle")))
@@ -795,7 +795,7 @@ class DeltaFlowBuilderTest {
     fun multipleCollectorsGetSameEmissions() = runTest {
         val events = MutableSharedFlow<String>()
 
-        val flow = deltaFlow<Item> { list ->
+        val flow = deltaList<Item> { list ->
             events.collect { event ->
                 if (event.startsWith("add:")) {
                     val name = event.removePrefix("add:")

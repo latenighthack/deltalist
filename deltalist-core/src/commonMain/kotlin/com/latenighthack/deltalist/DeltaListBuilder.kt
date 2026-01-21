@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.flow
 
 /**
  * A MutableList that also supports move operations.
- * Used within [FlowMutatingDeltaList.batch] blocks.
+ * Used within [ListMutatingDeltaList.batch] blocks.
  */
 interface MutatingDeltaList<T> : MutableList<T> {
     /**
@@ -15,14 +15,14 @@ interface MutatingDeltaList<T> : MutableList<T> {
 }
 
 /**
- * A list that emits mutations to a DeltaFlow as they occur.
+ * A list that emits mutations to a DeltaList as they occur.
  *
  * By default, each operation (add, remove, set, etc.) emits immediately.
  * Use [batch] to group multiple operations into a single emission.
  *
  * Example:
  * ```
- * deltaFlow { list ->
+ * deltaList { list ->
  *     // Each add emits immediately
  *     list.add(Item("1", "First"))
  *     list.add(Item("2", "Second"))
@@ -36,7 +36,7 @@ interface MutatingDeltaList<T> : MutableList<T> {
  * }
  * ```
  */
-interface FlowMutatingDeltaList<T> : List<T> {
+interface ListMutatingDeltaList<T> : List<T> {
     /**
      * Groups multiple mutations into a single emission.
      * The block receives a [MutatingDeltaList] for performing operations.
@@ -97,18 +97,21 @@ interface FlowMutatingDeltaList<T> : List<T> {
     suspend fun reload(elements: List<T>)
 }
 
+@Deprecated("Use ListMutatingDeltaList instead", ReplaceWith("ListMutatingDeltaList<T>"))
+typealias FlowMutatingDeltaList<T> = ListMutatingDeltaList<T>
+
 /**
- * Creates a [DeltaFlow] using a builder pattern similar to [flow].
+ * Creates a [DeltaList] using a builder pattern similar to [flow].
  *
- * The provided [block] receives a [FlowMutatingDeltaList] that can be modified
- * to emit deltas. By default, each mutation emits immediately. Use [FlowMutatingDeltaList.batch]
+ * The provided [block] receives a [ListMutatingDeltaList] that can be modified
+ * to emit deltas. By default, each mutation emits immediately. Use [ListMutatingDeltaList.batch]
  * to group multiple operations into a single emission.
  *
  * The first emission is always a Reload with the initial list state.
  *
  * Example:
  * ```
- * fun itemsFlow(sourceFlow: Flow<Event>): DeltaFlow<Item> = deltaFlow { list ->
+ * fun itemsFlow(sourceFlow: Flow<Event>): DeltaList<Item> = deltaList { list ->
  *     sourceFlow.collect { event ->
  *         when (event) {
  *             is Event.Added -> list.add(event.item)
@@ -125,16 +128,22 @@ interface FlowMutatingDeltaList<T> : List<T> {
  * @param initial The initial list contents (defaults to empty)
  * @param block The builder block that receives the mutable list
  */
-fun <T> deltaFlow(
+fun <T> deltaList(
     initial: List<T> = emptyList(),
-    block: suspend (FlowMutatingDeltaList<T>) -> Unit
-): DeltaFlow<T> = flow {
-    val list = FlowMutatingDeltaListImpl(initial, this)
+    block: suspend (ListMutatingDeltaList<T>) -> Unit
+): DeltaList<T> = flow {
+    val list = ListMutatingDeltaListImpl(initial, this)
     // Emit initial state as reload
     emit(Delta(list.snapshot(), Change.Reload))
     // Run the builder block
     block(list)
 }
+
+@Deprecated("Use deltaList instead", ReplaceWith("deltaList(initial, block)"))
+fun <T> deltaFlow(
+    initial: List<T> = emptyList(),
+    block: suspend (ListMutatingDeltaList<T>) -> Unit
+): DeltaList<T> = deltaList(initial, block)
 
 /**
  * Implementation of [MutatingDeltaList] that tracks mutations.
@@ -202,12 +211,12 @@ internal class MutatingDeltaListImpl<T>(
 }
 
 /**
- * Internal implementation of [FlowMutatingDeltaList].
+ * Internal implementation of [ListMutatingDeltaList].
  */
-private class FlowMutatingDeltaListImpl<T>(
+private class ListMutatingDeltaListImpl<T>(
     initial: List<T>,
     private val collector: FlowCollector<Delta<T>>
-) : FlowMutatingDeltaList<T>, AbstractList<T>() {
+) : ListMutatingDeltaList<T>, AbstractList<T>() {
 
     private val backing = initial.toMutableList()
 

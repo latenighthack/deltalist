@@ -2,7 +2,7 @@ package com.latenighthack.deltalist.operators
 
 import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
-import com.latenighthack.deltalist.DeltaFlow
+import com.latenighthack.deltalist.DeltaList
 import com.latenighthack.deltalist.LazyAccess
 import com.latenighthack.deltalist.Mutation
 import com.latenighthack.deltalist.SoftList
@@ -15,7 +15,7 @@ import kotlin.concurrent.atomics.ExperimentalAtomicApi
  * Simple lazy transformation without caching - transforms on every access.
  * Use this when transformations are cheap or when you don't need retention semantics.
  */
-fun <T, R> DeltaFlow<T>.lazyMap(transform: (T) -> R): DeltaFlow<R> = flow {
+fun <T, R> DeltaList<T>.lazyMap(transform: (T) -> R): DeltaList<R> = flow {
     collect { delta ->
         emit(Delta(
             items = SimpleLazyMapList(delta.items, transform),
@@ -24,7 +24,7 @@ fun <T, R> DeltaFlow<T>.lazyMap(transform: (T) -> R): DeltaFlow<R> = flow {
     }
 }
 
-typealias LazyDeltaFlow<T> = DeltaFlow<LazyAccess<T>>
+typealias LazyDeltaList<T> = DeltaList<LazyAccess<T>>
 
 /**
  * Lazy transformation with acquire/release semantics for memory management.
@@ -43,9 +43,9 @@ typealias LazyDeltaFlow<T> = DeltaFlow<LazyAccess<T>>
  * - Call release() when an item leaves the viewport
  *
  * @param transform The transformation function to apply lazily
- * @return A DeltaFlow of LazyAccess wrappers
+ * @return A DeltaList of LazyAccess wrappers
  */
-fun <T, R> DeltaFlow<T>.lazyMapWithAccess(transform: (T) -> R): LazyDeltaFlow<R> = flow {
+fun <T, R> DeltaList<T>.lazyMapWithAccess(transform: (T) -> R): LazyDeltaList<R> = flow {
     val state = LazyMapState(transform)
 
     collect { delta ->

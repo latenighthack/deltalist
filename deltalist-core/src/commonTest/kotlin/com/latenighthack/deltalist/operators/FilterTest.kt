@@ -3,7 +3,7 @@ package com.latenighthack.deltalist.operators
 import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
 import com.latenighthack.deltalist.Mutation
-import com.latenighthack.deltalist.mutableDeltaFlowOf
+import com.latenighthack.deltalist.mutableDeltaListOf
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
@@ -15,7 +15,7 @@ class FilterTest {
 
     @Test
     fun filterInitialReload() = runTest {
-        val source = mutableDeltaFlowOf(listOf(1, 2, 3, 4, 5))
+        val source = mutableDeltaListOf(listOf(1, 2, 3, 4, 5))
         val filtered = source.filterItems { it % 2 == 0 }
 
         val results = mutableListOf<Delta<Int>>()
@@ -34,7 +34,7 @@ class FilterTest {
 
     @Test
     fun filterInsertPassingItem() = runTest {
-        val source = mutableDeltaFlowOf(listOf(1, 3, 5))
+        val source = mutableDeltaListOf(listOf(1, 3, 5))
         val filtered = source.filterItems { it % 2 == 0 }
 
         val results = mutableListOf<Delta<Int>>()
@@ -60,7 +60,7 @@ class FilterTest {
 
     @Test
     fun filterInsertNonPassingItem() = runTest {
-        val source = mutableDeltaFlowOf(listOf(2, 4))
+        val source = mutableDeltaListOf(listOf(2, 4))
         val filtered = source.filterItems { it % 2 == 0 }
 
         val results = mutableListOf<Delta<Int>>()
@@ -80,7 +80,7 @@ class FilterTest {
 
     @Test
     fun filterRemovePassingItem() = runTest {
-        val source = mutableDeltaFlowOf(listOf(1, 2, 3, 4))
+        val source = mutableDeltaListOf(listOf(1, 2, 3, 4))
         val filtered = source.filterItems { it % 2 == 0 }
 
         val results = mutableListOf<Delta<Int>>()
@@ -105,7 +105,7 @@ class FilterTest {
 
     @Test
     fun filterRemoveNonPassingItem() = runTest {
-        val source = mutableDeltaFlowOf(listOf(1, 2, 3, 4))
+        val source = mutableDeltaListOf(listOf(1, 2, 3, 4))
         val filtered = source.filterItems { it % 2 == 0 }
 
         val results = mutableListOf<Delta<Int>>()
@@ -125,7 +125,7 @@ class FilterTest {
 
     @Test
     fun filterUpdateItemStillPasses() = runTest {
-        val source = mutableDeltaFlowOf(listOf(1, 2, 3, 4))
+        val source = mutableDeltaListOf(listOf(1, 2, 3, 4))
         val filtered = source.filterItems { it % 2 == 0 }
 
         val results = mutableListOf<Delta<Int>>()
@@ -149,7 +149,7 @@ class FilterTest {
 
     @Test
     fun filterUpdateItemNowFails() = runTest {
-        val source = mutableDeltaFlowOf(listOf(1, 2, 3, 4))
+        val source = mutableDeltaListOf(listOf(1, 2, 3, 4))
         val filtered = source.filterItems { it % 2 == 0 }
 
         val results = mutableListOf<Delta<Int>>()
@@ -173,7 +173,7 @@ class FilterTest {
 
     @Test
     fun filterUpdateItemNowPasses() = runTest {
-        val source = mutableDeltaFlowOf(listOf(1, 2, 3, 4))
+        val source = mutableDeltaListOf(listOf(1, 2, 3, 4))
         val filtered = source.filterItems { it % 2 == 0 }
 
         val results = mutableListOf<Delta<Int>>()
@@ -197,7 +197,7 @@ class FilterTest {
 
     @Test
     fun filterBatchInsertMixed() = runTest {
-        val source = mutableDeltaFlowOf(listOf(2, 4))
+        val source = mutableDeltaListOf(listOf(2, 4))
         val filtered = source.filterItems { it % 2 == 0 }
 
         val results = mutableListOf<Delta<Int>>()

@@ -52,7 +52,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
 import com.latenighthack.deltalist.DragState
-import com.latenighthack.deltalist.MoveableDeltaFlow
+import com.latenighthack.deltalist.MoveableDeltaList
 import com.latenighthack.deltalist.Mutation
 import com.latenighthack.deltalist.demo.ui.theme.DeltaListDemoTheme
 import kotlinx.coroutines.Job
@@ -304,7 +304,7 @@ private fun DragDropControlButtons(
 
 // RecyclerView Adapter
 private class DragDropAdapter(
-    private val moveable: MoveableDeltaFlow<Item>
+    private val moveable: MoveableDeltaList<Item>
 ) : RecyclerView.Adapter<DragDropAdapter.ViewHolder>() {
 
     private var items: List<Item> = emptyList()
@@ -384,7 +384,7 @@ private class DragDropAdapter(
 
 // ItemTouchHelper callback for drag and drop
 private class DragDropTouchCallback(
-    private val moveable: MoveableDeltaFlow<Item>,
+    private val moveable: MoveableDeltaList<Item>,
     private val lifecycleOwner: LifecycleOwner
 ) : ItemTouchHelper.Callback() {
 

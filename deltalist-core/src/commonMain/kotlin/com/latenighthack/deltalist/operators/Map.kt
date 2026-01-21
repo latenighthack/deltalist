@@ -1,7 +1,7 @@
 package com.latenighthack.deltalist.operators
 
 import com.latenighthack.deltalist.Delta
-import com.latenighthack.deltalist.DeltaFlow
+import com.latenighthack.deltalist.DeltaList
 import com.latenighthack.deltalist.SoftList
 import com.latenighthack.deltalist.SoftValue
 import kotlinx.coroutines.flow.map
@@ -31,7 +31,7 @@ internal class MappedList<T, R>(
     }
 }
 
-fun <T, R> DeltaFlow<T>.mapItems(transform: (T) -> R): DeltaFlow<R> = map { delta ->
+fun <T, R> DeltaList<T>.mapItems(transform: (T) -> R): DeltaList<R> = map { delta ->
     Delta(
         items = MappedList(delta.items, transform),
         change = delta.change

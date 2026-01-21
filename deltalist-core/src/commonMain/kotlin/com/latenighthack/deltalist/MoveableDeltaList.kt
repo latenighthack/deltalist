@@ -39,7 +39,7 @@ sealed class DragState<out T> {
 }
 
 /**
- * A [DeltaFlow] wrapper that enables drag-and-drop reordering.
+ * A [DeltaList] wrapper that enables drag-and-drop reordering.
  *
  * This wrapper provides optimistic reordering during drag - items visually
  * move as the user drags. On drop, the [onMove] callback is invoked to persist
@@ -55,7 +55,7 @@ sealed class DragState<out T> {
  * )
  * ```
  */
-interface MoveableDeltaFlow<T> : DeltaFlow<T> {
+interface MoveableDeltaList<T> : DeltaList<T> {
     /**
      * Current drag state. Observe this to render drag indicators and loading states.
      */
@@ -94,8 +94,11 @@ interface MoveableDeltaFlow<T> : DeltaFlow<T> {
     fun cancelDrag()
 }
 
+@Deprecated("Use MoveableDeltaList instead", ReplaceWith("MoveableDeltaList<T>"))
+typealias MoveableDeltaFlow<T> = MoveableDeltaList<T>
+
 /**
- * Wrap this [DeltaFlow] to enable drag-and-drop reordering.
+ * Wrap this [DeltaList] to enable drag-and-drop reordering.
  *
  * @param canMove Optional predicate to determine if a move is allowed.
  *                Called when drag starts and during drag.
@@ -103,19 +106,19 @@ interface MoveableDeltaFlow<T> : DeltaFlow<T> {
  * @param onMove Suspend callback invoked when a drag is committed.
  *               Should persist the move (e.g., to a database) and return true on success.
  */
-fun <T> DeltaFlow<T>.moveable(
+fun <T> DeltaList<T>.moveable(
     canMove: ((item: T, fromIndex: Int, toIndex: Int) -> Boolean)? = null,
     onMove: suspend (item: T, fromIndex: Int, toIndex: Int) -> Boolean
-): MoveableDeltaFlow<T> = MoveableDeltaFlowImpl(this, canMove, onMove)
+): MoveableDeltaList<T> = MoveableDeltaListImpl(this, canMove, onMove)
 
 /**
- * Implementation of [MoveableDeltaFlow].
+ * Implementation of [MoveableDeltaList].
  */
-internal class MoveableDeltaFlowImpl<T>(
-    private val upstream: DeltaFlow<T>,
+internal class MoveableDeltaListImpl<T>(
+    private val upstream: DeltaList<T>,
     private val canMove: ((item: T, fromIndex: Int, toIndex: Int) -> Boolean)?,
     private val onMove: suspend (item: T, fromIndex: Int, toIndex: Int) -> Boolean
-) : MoveableDeltaFlow<T> {
+) : MoveableDeltaList<T> {
 
     private val _dragState = MutableStateFlow<DragState<T>>(DragState.Idle)
     override val dragState: StateFlow<DragState<T>> = _dragState.asStateFlow()

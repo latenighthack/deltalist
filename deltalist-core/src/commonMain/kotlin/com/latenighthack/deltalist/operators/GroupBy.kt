@@ -7,9 +7,9 @@ import kotlinx.coroutines.flow.flow
  * Groups items into sections by a key selector.
  * The key becomes the section header.
  */
-fun <T, K> DeltaFlow<T>.groupBy(
+fun <T, K> DeltaList<T>.groupBy(
     keySelector: (T) -> K
-): SectionedDeltaFlow<K, T> = flow {
+): SectionedDeltaList<K, T> = flow {
     var previousGroups: Map<K, List<T>> = emptyMap()
     var previousKeyOrder: List<K> = emptyList()
 
@@ -48,10 +48,10 @@ fun <T, K> DeltaFlow<T>.groupBy(
 /**
  * Groups items into sections with custom section header data.
  */
-fun <T, K, S> DeltaFlow<T>.groupBy(
+fun <T, K, S> DeltaList<T>.groupBy(
     keySelector: (T) -> K,
     headerMapper: (K, List<T>) -> S
-): SectionedDeltaFlow<S, T> = flow {
+): SectionedDeltaList<S, T> = flow {
     var previousGroups: Map<K, List<T>> = emptyMap()
     var previousKeyOrder: List<K> = emptyList()
 
