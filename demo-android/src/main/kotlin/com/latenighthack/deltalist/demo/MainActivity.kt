@@ -90,5 +90,14 @@ fun MainScreen() {
         ) {
             Text("Sectioned List Demo")
         }
+
+        Button(
+            onClick = { context.startActivity(Intent(context, DragDropActivity::class.java)) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp)
+        ) {
+            Text("Drag & Drop Demo")
+        }
     }
 }
