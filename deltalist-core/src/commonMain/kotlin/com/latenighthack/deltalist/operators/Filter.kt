@@ -128,8 +128,59 @@ internal class FilteredList<T>(
     }
 }
 
+/**
+ * Adjust mutations to handle estimated size placeholders correctly.
+ * When new items are "inserted" at positions that were previously placeholders,
+ * convert those Inserts to Updates since the positions already existed in the UI.
+ *
+ * @param mutations The raw mutations from translateMutations
+ * @param previousLoadedCount Number of loaded (non-placeholder) items before the change
+ * @param previousEstimatedSize Total size including placeholders before the change
+ */
+private fun adjustMutationsForPlaceholders(
+    mutations: List<Mutation>,
+    previousLoadedCount: Int,
+    previousEstimatedSize: Int
+): List<Mutation> {
+    // No placeholders existed before - no adjustment needed
+    if (previousEstimatedSize <= previousLoadedCount) {
+        return mutations
+    }
+
+    val result = mutableListOf<Mutation>()
+    for (mutation in mutations) {
+        when (mutation) {
+            is Mutation.Insert -> {
+                // Inserts at positions within the old estimated size are filling placeholders
+                if (mutation.index < previousEstimatedSize) {
+                    // How many of these "inserts" are actually replacing placeholders?
+                    val placeholderEnd = previousEstimatedSize
+                    val updateEnd = minOf(mutation.index + mutation.count, placeholderEnd)
+                    val updateCount = updateEnd - mutation.index
+
+                    if (updateCount > 0) {
+                        result.add(Mutation.Update(mutation.index, updateCount))
+                    }
+
+                    // Any inserts beyond the old estimated size are true inserts
+                    val insertCount = mutation.count - updateCount
+                    if (insertCount > 0) {
+                        result.add(Mutation.Insert(updateEnd, insertCount))
+                    }
+                } else {
+                    // Insert is entirely beyond old estimated size - true insert
+                    result.add(mutation)
+                }
+            }
+            else -> result.add(mutation)
+        }
+    }
+    return result
+}
+
 fun <T> DeltaList<T>.filterItems(predicate: (T) -> Boolean): DeltaList<T> = flow {
     var previousFilteredIndices: Set<Int> = emptySet()
+    var previousFilteredSize: Int = 0
     var previousSourceItems: List<T> = emptyList()
 
     collect { delta ->
@@ -141,6 +192,9 @@ fun <T> DeltaList<T>.filterItems(predicate: (T) -> Boolean): DeltaList<T> = flow
         val (currentFilteredIndices, sourceLoadedCount) = buildFilteredIndices(sourceItems, predicate)
         val filteredIndicesList = currentFilteredIndices.sorted()
 
+        // Save previous loaded count for placeholder adjustment
+        val prevLoadedCount = previousFilteredIndices.size
+
         // If previousSourceItems is empty, we can't translate mutations - treat as Reload
         val change = if (previousSourceItems.isEmpty() && delta.change !is Change.Reload) {
             Change.Reload
@@ -148,7 +202,7 @@ fun <T> DeltaList<T>.filterItems(predicate: (T) -> Boolean): DeltaList<T> = flow
             when (delta.change) {
                 is Change.Reload -> Change.Reload
                 is Change.Mutations -> {
-                    val mutations = translateMutations(
+                    val rawMutations = translateMutations(
                         mutations = delta.change.operations,
                         previousSourceItems = previousSourceItems,
                         previousFilteredIndices = previousFilteredIndices,
@@ -156,9 +210,17 @@ fun <T> DeltaList<T>.filterItems(predicate: (T) -> Boolean): DeltaList<T> = flow
                         currentFilteredIndices = currentFilteredIndices,
                         predicate = predicate
                     )
+                    // Adjust mutations: inserts at placeholder positions become updates
+                    val mutations = adjustMutationsForPlaceholders(
+                        rawMutations,
+                        prevLoadedCount,
+                        previousFilteredSize
+                    )
                     if (mutations.isEmpty()) {
                         previousSourceItems = sourceItems
                         previousFilteredIndices = currentFilteredIndices
+                        val filteredList = FilteredList(sourceItems, filteredIndicesList, sourceLoadedCount)
+                        previousFilteredSize = filteredList.size
                         return@collect
                     }
                     Change.Mutations(mutations)
@@ -170,7 +232,9 @@ fun <T> DeltaList<T>.filterItems(predicate: (T) -> Boolean): DeltaList<T> = flow
         previousFilteredIndices = currentFilteredIndices
 
         // Use lazy filtered list - items are only accessed when get() is called
-        emit(Delta(FilteredList(sourceItems, filteredIndicesList, sourceLoadedCount), change))
+        val filteredList = FilteredList(sourceItems, filteredIndicesList, sourceLoadedCount)
+        previousFilteredSize = filteredList.size
+        emit(Delta(filteredList, change))
     }
 }
 
@@ -204,6 +268,7 @@ fun <T> DeltaList<T>.filterItemsDynamic(
     var currentSourceItems: List<T> = emptyList()
     var currentSourceLoadedCount: Int = 0
     var previousFilteredIndices: Set<Int> = emptySet()
+    var previousFilteredSize: Int = 0 // Track estimated size for placeholder handling
     var currentPredicate: ((T) -> Boolean)? = null
     var pendingDelta: Delta<T>? = null // Store delta if it arrives before predicate
 
@@ -274,6 +339,7 @@ fun <T> DeltaList<T>.filterItemsDynamic(
                     currentSourceLoadedCount = loadedCount
 
                     val filteredList = createFilteredList(sourceItems, filteredIndicesList, loadedCount)
+                    previousFilteredSize = filteredList.size
                     emit(Delta(filteredList, Change.Reload))
                     cascadeFetchesIfNeeded(filteredList, sourceItems, loadedCount)
                 } else if (currentSourceItems.isNotEmpty()) {
@@ -285,6 +351,7 @@ fun <T> DeltaList<T>.filterItemsDynamic(
                     currentSourceLoadedCount = loadedCount
 
                     val filteredList = createFilteredList(currentSourceItems, filteredIndicesList, loadedCount)
+                    previousFilteredSize = filteredList.size
                     emit(Delta(filteredList, Change.Reload))
                     cascadeFetchesIfNeeded(filteredList, currentSourceItems, loadedCount)
                 }
@@ -303,6 +370,9 @@ fun <T> DeltaList<T>.filterItemsDynamic(
                 val sourceItems = delta.items
                 currentSourceItems = sourceItems
 
+                // Save previous loaded count for placeholder adjustment
+                val prevLoadedCount = previousFilteredIndices.size
+
                 val (currentFilteredIndices, loadedCount) = buildFilteredIndices(sourceItems, predicate)
                 val filteredIndicesList = currentFilteredIndices.sorted()
                 currentSourceLoadedCount = loadedCount
@@ -314,7 +384,7 @@ fun <T> DeltaList<T>.filterItemsDynamic(
                     when (delta.change) {
                         is Change.Reload -> Change.Reload
                         is Change.Mutations -> {
-                            val mutations = translateMutations(
+                            val rawMutations = translateMutations(
                                 mutations = delta.change.operations,
                                 previousSourceItems = currentSourceItems,
                                 previousFilteredIndices = previousFilteredIndices,
@@ -322,10 +392,17 @@ fun <T> DeltaList<T>.filterItemsDynamic(
                                 currentFilteredIndices = currentFilteredIndices,
                                 predicate = predicate
                             )
+                            // Adjust mutations: inserts at placeholder positions become updates
+                            val mutations = adjustMutationsForPlaceholders(
+                                rawMutations,
+                                prevLoadedCount,
+                                previousFilteredSize
+                            )
                             if (mutations.isEmpty()) {
                                 previousFilteredIndices = currentFilteredIndices
                                 // Still cascade fetches even if no mutations to emit
                                 val filteredList = createFilteredList(sourceItems, filteredIndicesList, loadedCount)
+                                previousFilteredSize = filteredList.size
                                 cascadeFetchesIfNeeded(filteredList, sourceItems, loadedCount)
                                 return@collect
                             }
@@ -337,6 +414,7 @@ fun <T> DeltaList<T>.filterItemsDynamic(
                 previousFilteredIndices = currentFilteredIndices
 
                 val filteredList = createFilteredList(sourceItems, filteredIndicesList, loadedCount)
+                previousFilteredSize = filteredList.size
                 emit(Delta(filteredList, change))
                 cascadeFetchesIfNeeded(filteredList, sourceItems, loadedCount)
             }
