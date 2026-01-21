@@ -195,6 +195,7 @@ fun <T> DeltaFlow<T>.filterItemsDynamic(
     var currentSourceLoadedCount: Int = 0
     var previousFilteredIndices: Set<Int> = emptySet()
     var currentPredicate: ((T) -> Boolean)? = null
+    var pendingDelta: Delta<T>? = null // Store delta if it arrives before predicate
 
     // Merge upstream deltas with predicate changes
     val upstream = this@filterItemsDynamic
@@ -207,21 +208,43 @@ fun <T> DeltaFlow<T>.filterItemsDynamic(
             is FilterEvent.PredicateChanged -> {
                 currentPredicate = event.predicate
 
-                // Predicate changed - re-filter current items and emit Reload
-                if (currentSourceItems.isEmpty()) return@collect
+                // Check if we have a pending delta that arrived before the predicate
+                val deltaToProcess = pendingDelta
+                pendingDelta = null
 
-                val (filteredIndices, loadedCount) = buildFilteredIndices(currentSourceItems, event.predicate)
-                val filteredIndicesList = filteredIndices.sorted()
+                if (deltaToProcess != null) {
+                    // Process the pending delta with the new predicate
+                    val sourceItems = deltaToProcess.items
+                    currentSourceItems = sourceItems
 
-                previousFilteredIndices = filteredIndices
-                currentSourceLoadedCount = loadedCount
+                    val (filteredIndices, loadedCount) = buildFilteredIndices(sourceItems, event.predicate)
+                    val filteredIndicesList = filteredIndices.sorted()
 
-                emit(Delta(FilteredList(currentSourceItems, filteredIndicesList, loadedCount), Change.Reload))
+                    previousFilteredIndices = filteredIndices
+                    currentSourceLoadedCount = loadedCount
+
+                    emit(Delta(FilteredList(sourceItems, filteredIndicesList, loadedCount), Change.Reload))
+                } else if (currentSourceItems.isNotEmpty()) {
+                    // Predicate changed - re-filter current items and emit Reload
+                    val (filteredIndices, loadedCount) = buildFilteredIndices(currentSourceItems, event.predicate)
+                    val filteredIndicesList = filteredIndices.sorted()
+
+                    previousFilteredIndices = filteredIndices
+                    currentSourceLoadedCount = loadedCount
+
+                    emit(Delta(FilteredList(currentSourceItems, filteredIndicesList, loadedCount), Change.Reload))
+                }
             }
 
             is FilterEvent.UpstreamDelta -> {
                 val delta = event.delta
-                val predicate = currentPredicate ?: return@collect
+                val predicate = currentPredicate
+
+                if (predicate == null) {
+                    // Store delta to process when predicate arrives
+                    pendingDelta = delta
+                    return@collect
+                }
 
                 val sourceItems = delta.items
                 currentSourceItems = sourceItems
