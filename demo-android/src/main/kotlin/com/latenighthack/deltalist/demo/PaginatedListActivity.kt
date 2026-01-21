@@ -114,9 +114,11 @@ private fun PaginatedComposeContent(viewModel: PaginatedListViewModel) {
             items(
                 count = filteredCount,
                 key = { index ->
+                    // Use distinct key prefixes to avoid collisions between
+                    // loaded values (e.g., 8) and loading indices (e.g., 8)
                     when (val soft = delta.items.softGetOrNull(index)) {
-                        is SoftValue.Present -> soft.value
-                        else -> index
+                        is SoftValue.Present -> "v:${soft.value}"
+                        else -> "i:$index"
                     }
                 }
             ) { index ->
