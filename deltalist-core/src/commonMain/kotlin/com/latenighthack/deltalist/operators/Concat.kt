@@ -4,20 +4,42 @@ import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
 import com.latenighthack.deltalist.DeltaList
 import com.latenighthack.deltalist.Mutation
+import com.latenighthack.deltalist.SoftList
+import com.latenighthack.deltalist.SoftValue
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
 
 /**
  * Lazy list that concatenates two lists without accessing items until needed.
+ * Implements [SoftList] to propagate soft access from either source list.
  */
 internal class ConcatenatedList<T>(
     private val first: List<T>,
     private val second: List<T>
-) : AbstractList<T>() {
+) : AbstractList<T>(), SoftList<T> {
     override val size: Int get() = first.size + second.size
 
     override fun get(index: Int): T =
         if (index < first.size) first[index] else second[index - first.size]
+
+    override fun softGet(index: Int): SoftValue<T>? {
+        if (index < 0 || index >= size) return null
+
+        return if (index < first.size) {
+            if (first is SoftList<T>) {
+                first.softGet(index)
+            } else {
+                SoftValue.Present(first[index])
+            }
+        } else {
+            val secondIndex = index - first.size
+            if (second is SoftList<T>) {
+                second.softGet(secondIndex)
+            } else {
+                SoftValue.Present(second[secondIndex])
+            }
+        }
+    }
 }
 
 fun <T> DeltaList<T>.concat(other: DeltaList<T>): DeltaList<T> = combine(this, other) { first, second ->
