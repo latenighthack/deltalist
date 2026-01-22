@@ -2,6 +2,14 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.skie)
+}
+
+skie {
+    features {
+        // Enable SwiftUI preview support
+        enableSwiftUIObservingPreview = true
+    }
 }
 
 kotlin {

@@ -3,13 +3,14 @@ import SwiftUI
 import DemoCore
 
 /// Wraps the shared Kotlin PaginatedListViewModel for use in SwiftUI and UIKit.
+/// Uses SKIE's automatic Flow→AsyncSequence conversion to eliminate FlowCollector boilerplate.
 @MainActor
 class PaginatedListViewModelAdapter: ObservableObject {
     private let viewModel = PaginatedListViewModel()
 
     @Published private(set) var numbers: [Int] = []
     @Published private(set) var totalSize: Int = 0
-    @Published private(set) var loadingDirection: LoadDirection? = nil
+    @Published private(set) var loadingDirection: DemoCore.LoadDirection? = nil
     @Published private(set) var loadedCount: Int = 0
     @Published private(set) var excludeDivisors: Set<Int> = []
 
@@ -26,41 +27,28 @@ class PaginatedListViewModelAdapter: ObservableObject {
     }
 
     private func startCollecting() {
-        // Collect paginated numbers
+        // SKIE converts Flows to AsyncSequence automatically
         numbersTask = Task { @MainActor [weak self] in
             guard let self = self else { return }
 
-            let collector = IntDeltaFlowCollector { [weak self] delta in
-                guard let self = self else { return }
+            for await delta in self.viewModel.paginatedNumbers {
+                if Task.isCancelled { break }
                 // Store delta so we can request more items later
                 self.currentDelta = delta
                 // Use delta.loadedItems() to safely get only loaded items without triggering bridging
-                // IMPORTANT: Never access delta.items directly from Swift - it triggers bridging
                 let loadedItems = delta.loadedItems()
                 self.numbers = loadedItems.compactMap { ($0 as? NSNumber)?.intValue }
                 self.totalSize = Int(delta.totalSize())
             }
-
-            do {
-                try await self.viewModel.paginatedNumbers.collect(collector: collector)
-            } catch {
-                // Collection ended
-            }
         }
 
-        // Collect loading direction
+        // Collect loading direction using SKIE's StateFlow→AsyncSequence
         loadingDirectionTask = Task { @MainActor [weak self] in
             guard let self = self else { return }
 
-            let collector = OptionalStateFlowCollector<LoadDirection> { [weak self] value in
-                guard let self = self else { return }
-                self.loadingDirection = value
-            }
-
-            do {
-                try await self.viewModel.paginatedLoadingDirection.collect(collector: collector)
-            } catch {
-                // Collection ended
+            for await direction in self.viewModel.paginatedLoadingDirection {
+                if Task.isCancelled { break }
+                self.loadingDirection = direction
             }
         }
 
@@ -68,15 +56,9 @@ class PaginatedListViewModelAdapter: ObservableObject {
         loadedCountTask = Task { @MainActor [weak self] in
             guard let self = self else { return }
 
-            let collector = StateFlowCollector<KotlinInt> { [weak self] value in
-                guard let self = self else { return }
-                self.loadedCount = value.intValue
-            }
-
-            do {
-                try await self.viewModel.paginatedLoadedCount.collect(collector: collector)
-            } catch {
-                // Collection ended
+            for await count in self.viewModel.paginatedLoadedCount {
+                if Task.isCancelled { break }
+                self.loadedCount = count.intValue
             }
         }
 
@@ -84,15 +66,9 @@ class PaginatedListViewModelAdapter: ObservableObject {
         excludeDivisorsTask = Task { @MainActor [weak self] in
             guard let self = self else { return }
 
-            let collector = SetStateFlowCollector { [weak self] value in
-                guard let self = self else { return }
-                self.excludeDivisors = Set(value.compactMap { ($0 as? NSNumber)?.intValue })
-            }
-
-            do {
-                try await self.viewModel.excludeDivisors.collect(collector: collector)
-            } catch {
-                // Collection ended
+            for await divisors in self.viewModel.excludeDivisors {
+                if Task.isCancelled { break }
+                self.excludeDivisors = Set(divisors.compactMap { ($0 as? NSNumber)?.intValue })
             }
         }
     }
@@ -136,63 +112,5 @@ class PaginatedListViewModelAdapter: ObservableObject {
         loadingDirectionTask?.cancel()
         loadedCountTask?.cancel()
         excludeDivisorsTask?.cancel()
-    }
-}
-
-// MARK: - Flow Collectors
-
-/// FlowCollector for DeltaList<Int> flows.
-class IntDeltaFlowCollector: Kotlinx_coroutines_coreFlowCollector {
-    private let onDelta: (Delta<KotlinInt>) -> Void
-
-    init(onDelta: @escaping (Delta<KotlinInt>) -> Void) {
-        self.onDelta = onDelta
-    }
-
-    func emit(value: Any?, completionHandler: @escaping (Error?) -> Void) {
-        if let delta = value as? Delta<KotlinInt> {
-            Task { @MainActor [self] in
-                self.onDelta(delta)
-                completionHandler(nil)
-            }
-        } else {
-            completionHandler(nil)
-        }
-    }
-}
-
-/// FlowCollector for optional StateFlow values.
-class OptionalStateFlowCollector<T: AnyObject>: Kotlinx_coroutines_coreFlowCollector {
-    private let onValue: (T?) -> Void
-
-    init(onValue: @escaping (T?) -> Void) {
-        self.onValue = onValue
-    }
-
-    func emit(value: Any?, completionHandler: @escaping (Error?) -> Void) {
-        Task { @MainActor [self] in
-            self.onValue(value as? T)
-            completionHandler(nil)
-        }
-    }
-}
-
-/// FlowCollector for Set StateFlow values.
-class SetStateFlowCollector: Kotlinx_coroutines_coreFlowCollector {
-    private let onValue: (Set<AnyHashable>) -> Void
-
-    init(onValue: @escaping (Set<AnyHashable>) -> Void) {
-        self.onValue = onValue
-    }
-
-    func emit(value: Any?, completionHandler: @escaping (Error?) -> Void) {
-        if let kotlinSet = value as? Set<AnyHashable> {
-            Task { @MainActor [self] in
-                self.onValue(kotlinSet)
-                completionHandler(nil)
-            }
-        } else {
-            completionHandler(nil)
-        }
     }
 }

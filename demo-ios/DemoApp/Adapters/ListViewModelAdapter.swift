@@ -3,12 +3,13 @@ import SwiftUI
 import DemoCore
 
 /// Wraps the shared Kotlin ListViewModel for use in SwiftUI and UIKit.
+/// Uses SKIE's automatic Flow→AsyncSequence conversion to eliminate FlowCollector boilerplate.
 @MainActor
 class ListViewModelAdapter: ObservableObject {
-    private let viewModel = ListViewModel()
+    let viewModel = ListViewModel()
 
     @Published private(set) var items: [ItemWrapper] = []
-    @Published private(set) var tickingItems: [StableTickingItemWrapper] = []
+    @Published private(set) var tickingItems: [TickingItemWrapper] = []
 
     private var itemsTask: Task<Void, Never>?
     private var tickingItemsTask: Task<Void, Never>?
@@ -18,41 +19,31 @@ class ListViewModelAdapter: ObservableObject {
     }
 
     private func startCollecting() {
-        // Collect from items DeltaList
+        // SKIE converts DeltaList (which is a Flow) to AsyncSequence automatically
+        // No more FlowCollector classes needed!
         itemsTask = Task { @MainActor [weak self] in
             guard let self = self else { return }
 
-            let collector = DeltaFlowCollector<Item> { [weak self] delta in
-                guard let self = self else { return }
+            // Direct iteration over the Kotlin Flow via SKIE's AsyncSequence bridging
+            for await delta in self.viewModel.items {
+                if Task.isCancelled { break }
+                // delta.items is a Kotlin List which bridges to Swift Array
                 self.items = delta.items.compactMap { item -> ItemWrapper? in
                     guard let kotlinItem = item as? Item else { return nil }
                     return ItemWrapper(kotlinItem: kotlinItem)
                 }
             }
-
-            do {
-                try await self.viewModel.items.collect(collector: collector)
-            } catch {
-                // Collection ended
-            }
         }
 
-        // Collect from tickingItems DeltaList
         tickingItemsTask = Task { @MainActor [weak self] in
             guard let self = self else { return }
 
-            let collector = DeltaFlowCollector<StableItem> { [weak self] delta in
-                guard let self = self else { return }
-                self.tickingItems = delta.items.compactMap { item -> StableTickingItemWrapper? in
-                    guard let stableItem = item as? StableItem else { return nil }
-                    return StableTickingItemWrapper(kotlinStableItem: stableItem)
+            for await delta in self.viewModel.tickingItems {
+                if Task.isCancelled { break }
+                self.tickingItems = delta.items.compactMap { stableItem -> TickingItemWrapper? in
+                    guard let item = stableItem as? StableItem else { return nil }
+                    return TickingItemWrapper(kotlinStableItem: item)
                 }
-            }
-
-            do {
-                try await self.viewModel.tickingItems.collect(collector: collector)
-            } catch {
-                // Collection ended
             }
         }
     }
@@ -91,112 +82,5 @@ class ListViewModelAdapter: ObservableObject {
     deinit {
         itemsTask?.cancel()
         tickingItemsTask?.cancel()
-    }
-}
-
-// MARK: - Wrapper Types
-
-/// Wraps a Kotlin Item for use in Swift.
-struct ItemWrapper: Identifiable, Hashable {
-    let id: String
-    let title: String
-
-    init(kotlinItem: Item) {
-        self.id = kotlinItem.id
-        self.title = kotlinItem.title
-    }
-}
-
-/// Wraps a Kotlin StableItem<TickingItem> for use in Swift.
-class StableTickingItemWrapper: ObservableObject, Identifiable {
-    let stableId: Int
-    let item: ItemWrapper
-
-    @Published private(set) var tickCount: Int = 0
-
-    private var tickTask: Task<Void, Never>?
-    private let kotlinTickingItem: TickingItem
-
-    var id: Int { stableId }
-
-    init?(kotlinStableItem: StableItem) {
-        self.stableId = Int(kotlinStableItem.stableId)
-
-        guard let tickingItem = kotlinStableItem.value as? TickingItem else {
-            return nil
-        }
-
-        self.kotlinTickingItem = tickingItem
-        self.item = ItemWrapper(kotlinItem: tickingItem.item)
-
-        startTickCollection()
-    }
-
-    private func startTickCollection() {
-        tickTask = Task { @MainActor [weak self] in
-            guard let self = self else { return }
-
-            let collector = StateFlowCollector<KotlinInt> { [weak self] value in
-                guard let self = self else { return }
-                self.tickCount = value.intValue
-            }
-
-            do {
-                try await self.kotlinTickingItem.tickCount.collect(collector: collector)
-            } catch {
-                // Collection ended
-            }
-        }
-    }
-
-    func stop() {
-        tickTask?.cancel()
-        kotlinTickingItem.stop()
-    }
-
-    deinit {
-        tickTask?.cancel()
-    }
-}
-
-// MARK: - Flow Collectors
-
-/// Generic FlowCollector for DeltaList flows.
-class DeltaFlowCollector<T: AnyObject>: Kotlinx_coroutines_coreFlowCollector {
-    private let onDelta: (Delta<T>) -> Void
-
-    init(onDelta: @escaping (Delta<T>) -> Void) {
-        self.onDelta = onDelta
-    }
-
-    func emit(value: Any?, completionHandler: @escaping (Error?) -> Void) {
-        if let delta = value as? Delta<T> {
-            Task { @MainActor [self] in
-                self.onDelta(delta)
-                completionHandler(nil)
-            }
-        } else {
-            completionHandler(nil)
-        }
-    }
-}
-
-/// FlowCollector for StateFlow values.
-class StateFlowCollector<T: AnyObject>: Kotlinx_coroutines_coreFlowCollector {
-    private let onValue: (T) -> Void
-
-    init(onValue: @escaping (T) -> Void) {
-        self.onValue = onValue
-    }
-
-    func emit(value: Any?, completionHandler: @escaping (Error?) -> Void) {
-        if let typedValue = value as? T {
-            Task { @MainActor [self] in
-                self.onValue(typedValue)
-                completionHandler(nil)
-            }
-        } else {
-            completionHandler(nil)
-        }
     }
 }

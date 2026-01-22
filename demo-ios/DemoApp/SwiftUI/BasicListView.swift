@@ -1,4 +1,5 @@
 import SwiftUI
+import DemoCore
 
 /// Basic list demo screen with ticking items.
 /// Shows both SwiftUI and UIKit implementations via tab bar.
@@ -45,22 +46,26 @@ private struct BasicListSwiftUIContent: View {
     var body: some View {
         VStack(spacing: 0) {
             List {
-                ForEach(viewModel.tickingItems) { stableItem in
+                ForEach(viewModel.tickingItems) { tickingItem in
                     TickingItemRow(
-                        tickingItem: stableItem,
-                        isSelected: stableItem.item.id == selectedId
+                        tickingItem: tickingItem,
+                        isSelected: tickingItem.item.id == selectedId
                     )
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        if selectedId == stableItem.item.id {
+                        if selectedId == tickingItem.item.id {
                             selectedId = nil
                         } else {
-                            selectedId = stableItem.item.id
+                            selectedId = tickingItem.item.id
                         }
                     }
+                    .onAppear {
+                        // Resume observation when item scrolls into view
+                        tickingItem.resumeObservation()
+                    }
                     .onDisappear {
-                        // Release lazy item when it scrolls out of view
-                        stableItem.stop()
+                        // Pause observation when item scrolls out of view
+                        tickingItem.pauseObservation()
                     }
                 }
             }
@@ -79,7 +84,7 @@ private struct BasicListSwiftUIContent: View {
 // MARK: - Ticking Item Row
 
 private struct TickingItemRow: View {
-    @ObservedObject var tickingItem: StableTickingItemWrapper
+    @ObservedObject var tickingItem: TickingItemWrapper
     let isSelected: Bool
 
     var body: some View {
