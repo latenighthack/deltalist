@@ -165,7 +165,7 @@ private struct DragDropControlButtons: View {
     }
 }
 
-// MARK: - UIKit Content (Placeholder)
+// MARK: - UIKit Content
 
 private struct DragDropUIKitContent: View {
     @ObservedObject var viewModel: DragDropViewModelAdapter
@@ -174,12 +174,24 @@ private struct DragDropUIKitContent: View {
         VStack(spacing: 0) {
             DragStatusBar(dragState: viewModel.dragState)
 
-            Text("UICollectionView implementation with drag delegates")
-                .foregroundColor(.secondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            DragDropViewControllerRepresentable(viewModel: viewModel)
 
             DragDropControlButtons(viewModel: viewModel)
         }
+    }
+}
+
+// MARK: - UIViewControllerRepresentable
+
+private struct DragDropViewControllerRepresentable: UIViewControllerRepresentable {
+    let viewModel: DragDropViewModelAdapter
+
+    func makeUIViewController(context: Context) -> DragDropViewController {
+        DragDropViewController(viewModel: viewModel)
+    }
+
+    func updateUIViewController(_ uiViewController: DragDropViewController, context: Context) {
+        // Updates handled by Combine bindings in the view controller
     }
 }
 

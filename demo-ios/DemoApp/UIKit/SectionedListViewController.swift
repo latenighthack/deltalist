@@ -88,13 +88,15 @@ class SectionedListViewController: UIViewController {
 
     private func sectionIndex(for indexPath: IndexPath) -> Int {
         let rows = viewModel.flattenedRows
-        var count = 0
-        for i in 0..<min(indexPath.item, rows.count) {
+        guard indexPath.item < rows.count else { return -1 }
+
+        var sectionCount = -1
+        for i in 0...indexPath.item {
             if case .header = rows[i] {
-                count += 1
+                sectionCount += 1
             }
         }
-        return count - 1
+        return sectionCount
     }
 }
 

@@ -244,15 +244,56 @@ private struct SectionedControlButtons: View {
     }
 }
 
-// MARK: - UIKit Content (Placeholder)
+// MARK: - UIKit Content
 
 private struct SectionedUIKitContent: View {
     @ObservedObject var viewModel: SectionedListViewModelAdapter
+    @State private var selectedSectionIndex: Int = -1
 
     var body: some View {
-        Text("UICollectionView implementation")
-            .foregroundColor(.secondary)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(spacing: 0) {
+            SectionedListViewControllerRepresentable(
+                viewModel: viewModel,
+                selectedSectionIndex: $selectedSectionIndex
+            )
+
+            // Section action buttons
+            if selectedSectionIndex >= 0 && selectedSectionIndex < viewModel.sections.count {
+                HStack {
+                    Button("Add Item") {
+                        viewModel.addItemToSection(selectedSectionIndex)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Remove Section") {
+                        viewModel.removeSection(at: selectedSectionIndex)
+                        selectedSectionIndex = -1
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                }
+                .padding()
+            }
+        }
+    }
+}
+
+// MARK: - UIViewControllerRepresentable
+
+private struct SectionedListViewControllerRepresentable: UIViewControllerRepresentable {
+    let viewModel: SectionedListViewModelAdapter
+    @Binding var selectedSectionIndex: Int
+
+    func makeUIViewController(context: Context) -> SectionedListViewController {
+        let vc = SectionedListViewController(viewModel: viewModel)
+        vc.onSectionSelected = { index in
+            selectedSectionIndex = index
+        }
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: SectionedListViewController, context: Context) {
+        uiViewController.selectedSectionIndex = selectedSectionIndex
     }
 }
 

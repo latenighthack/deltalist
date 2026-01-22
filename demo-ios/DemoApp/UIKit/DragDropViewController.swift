@@ -8,6 +8,9 @@ class DragDropViewController: UIViewController {
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, String>!
     private var cancellables = Set<AnyCancellable>()
+    private var dragSourceIndex: Int?
+    private var dropDestinationIndex: Int?
+    private var isDragging: Bool = false
 
     init(viewModel: DragDropViewModelAdapter) {
         self.viewModel = viewModel
@@ -71,6 +74,10 @@ class DragDropViewController: UIViewController {
     }
 
     private func updateSnapshot(items: [ItemWrapper]) {
+        // Skip snapshot updates during drag to avoid feedback loop
+        // UICollectionView handles visual reordering natively during drag
+        guard !isDragging else { return }
+
         var snapshot = NSDiffableDataSourceSnapshot<Int, String>()
         snapshot.appendSections([0])
         snapshot.appendItems(items.map { $0.id }, toSection: 0)
@@ -88,6 +95,11 @@ extension DragDropViewController: UICollectionViewDragDelegate {
         // Don't allow dragging pinned items
         guard viewModel.canMove(item: item) else { return [] }
 
+        isDragging = true
+        dragSourceIndex = indexPath.item
+        dropDestinationIndex = indexPath.item
+
+        // Begin drag in Kotlin model (but don't update preview during drag)
         _ = viewModel.beginDrag(at: indexPath.item)
 
         let itemProvider = NSItemProvider(object: item.id as NSString)
@@ -110,20 +122,62 @@ extension DragDropViewController: UICollectionViewDropDelegate {
         }
 
         if let destPath = destinationIndexPath {
-            viewModel.updateDragPreview(to: destPath.item)
+            // UICollectionView's destinationIndexPath is already the final position
+            dropDestinationIndex = destPath.item
         }
 
         return UICollectionViewDropProposal(operation: .move, intent: .insertAtDestinationIndexPath)
     }
 
     func collectionView(_ collectionView: UICollectionView, performDropWith coordinator: UICollectionViewDropCoordinator) {
+        guard dragSourceIndex != nil else {
+            viewModel.cancelDrag()
+            isDragging = false
+            dragSourceIndex = nil
+            dropDestinationIndex = nil
+            return
+        }
+
+        // Get destination from coordinator, fall back to tracked value
+        let destIndex: Int
+        if let destPath = coordinator.destinationIndexPath {
+            // UICollectionView's destinationIndexPath is already the final position
+            // (accounts for source removal with .insertAtDestinationIndexPath intent)
+            destIndex = destPath.item
+        } else if let tracked = dropDestinationIndex {
+            destIndex = tracked
+        } else {
+            // No valid destination, cancel
+            viewModel.cancelDrag()
+            isDragging = false
+            dragSourceIndex = nil
+            dropDestinationIndex = nil
+            updateSnapshot(items: viewModel.items)
+            return
+        }
+
+        // Update preview to final destination and commit
+        viewModel.updateDragPreview(to: destIndex)
         Task {
-            await viewModel.commitDrag()
+            _ = await viewModel.commitDrag()
+            isDragging = false
+            dragSourceIndex = nil
+            dropDestinationIndex = nil
+            // Trigger snapshot update now that drag is complete
+            updateSnapshot(items: viewModel.items)
         }
     }
 
     func collectionView(_ collectionView: UICollectionView, dropSessionDidEnd session: UIDropSession) {
-        // Cleanup if needed
+        // Cancel the Kotlin drag if session ended without a drop
+        if isDragging {
+            viewModel.cancelDrag()
+        }
+        isDragging = false
+        dragSourceIndex = nil
+        dropDestinationIndex = nil
+        // Trigger snapshot update in case drag was cancelled
+        updateSnapshot(items: viewModel.items)
     }
 }
 

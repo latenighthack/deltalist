@@ -41,46 +41,51 @@ class PaginatedListViewController: UIViewController {
     }
 
     private func setupDataSource() {
-        let numberCellRegistration = UICollectionView.CellRegistration<NumberCell, Int> { cell, indexPath, number in
-            cell.configure(number: number, index: indexPath.item)
+        let numberCellRegistration = UICollectionView.CellRegistration<NumberCell, PaginatedItem> { cell, indexPath, item in
+            if case .loaded(let number, let index) = item {
+                cell.configure(number: number, index: index)
+            }
         }
 
-        let loadingCellRegistration = UICollectionView.CellRegistration<LoadingCell, Int> { cell, indexPath, _ in
-            cell.configure(index: indexPath.item)
+        let loadingCellRegistration = UICollectionView.CellRegistration<LoadingCell, PaginatedItem> { cell, indexPath, item in
+            cell.configure(index: item.index)
         }
 
         dataSource = UICollectionViewDiffableDataSource<Int, PaginatedItem>(collectionView: collectionView) { collectionView, indexPath, item in
             switch item {
-            case .loaded(let number):
-                return collectionView.dequeueConfiguredReusableCell(using: numberCellRegistration, for: indexPath, item: number)
-            case .loading(let index):
-                return collectionView.dequeueConfiguredReusableCell(using: loadingCellRegistration, for: indexPath, item: index)
+            case .loaded:
+                return collectionView.dequeueConfiguredReusableCell(using: numberCellRegistration, for: indexPath, item: item)
+            case .loading:
+                return collectionView.dequeueConfiguredReusableCell(using: loadingCellRegistration, for: indexPath, item: item)
             }
         }
     }
 
     private func bindViewModel() {
-        viewModel.$numbers
+        // Listen to both totalSize and numbers changes to update the snapshot
+        Publishers.CombineLatest(viewModel.$totalSize, viewModel.$numbers)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] numbers in
-                self?.updateSnapshot(numbers: numbers)
+            .sink { [weak self] totalSize, _ in
+                self?.updateSnapshot(totalSize: totalSize)
             }
             .store(in: &cancellables)
     }
 
-    private func updateSnapshot(numbers: [Int]) {
+    private func updateSnapshot(totalSize: Int) {
         var snapshot = NSDiffableDataSourceSnapshot<Int, PaginatedItem>()
         snapshot.appendSections([0])
 
-        let items = numbers.map { PaginatedItem.loaded($0) }
+        // Show totalSize items - each one is either loaded or loading
+        let items: [PaginatedItem] = (0..<totalSize).map { index in
+            if let number = viewModel.getLoadedItemAt(index: index) {
+                return .loaded(number, index: index)
+            } else {
+                return .loading(index)
+            }
+        }
         snapshot.appendItems(items, toSection: 0)
 
-        // Add loading indicator if more items available
-        if viewModel.loadedCount < 10_000 {
-            snapshot.appendItems([.loading(numbers.count)], toSection: 0)
-        }
-
-        dataSource.apply(snapshot, animatingDifferences: true)
+        dataSource.apply(snapshot, animatingDifferences: false)
     }
 }
 
@@ -88,15 +93,26 @@ class PaginatedListViewController: UIViewController {
 
 extension PaginatedListViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
-        // Pagination is handled by the Kotlin ViewModel automatically
+        // Trigger loading when a loading cell is displayed
+        guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
+        if case .loading(let index) = item {
+            viewModel.triggerLoadAt(index: index)
+        }
     }
 }
 
 // MARK: - Paginated Item
 
 private enum PaginatedItem: Hashable {
-    case loaded(Int)
+    case loaded(Int, index: Int)
     case loading(Int)
+
+    var index: Int {
+        switch self {
+        case .loaded(_, let index): return index
+        case .loading(let index): return index
+        }
+    }
 }
 
 // MARK: - Number Cell

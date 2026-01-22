@@ -157,7 +157,7 @@ private struct DivisorFilterBar: View {
     }
 }
 
-// MARK: - UIKit Content (Placeholder)
+// MARK: - UIKit Content
 
 private struct PaginatedUIKitContent: View {
     @ObservedObject var viewModel: PaginatedListViewModelAdapter
@@ -166,13 +166,24 @@ private struct PaginatedUIKitContent: View {
         VStack(spacing: 0) {
             PaginatedStatusBar(viewModel: viewModel)
 
-            // UICollectionView would go here
-            Text("UICollectionView implementation")
-                .foregroundColor(.secondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            PaginatedListViewControllerRepresentable(viewModel: viewModel)
 
             DivisorFilterBar(viewModel: viewModel)
         }
+    }
+}
+
+// MARK: - UIViewControllerRepresentable
+
+private struct PaginatedListViewControllerRepresentable: UIViewControllerRepresentable {
+    let viewModel: PaginatedListViewModelAdapter
+
+    func makeUIViewController(context: Context) -> PaginatedListViewController {
+        PaginatedListViewController(viewModel: viewModel)
+    }
+
+    func updateUIViewController(_ uiViewController: PaginatedListViewController, context: Context) {
+        // Updates handled by Combine bindings in the view controller
     }
 }
 
