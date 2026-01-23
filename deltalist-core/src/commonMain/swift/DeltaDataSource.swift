@@ -1,12 +1,27 @@
+#if canImport(UIKit)
 import UIKit
+import Combine
 
-/// Base data source for UICollectionView that automatically handles DeltaList updates.
+/// Generic UICollectionView data source that observes a DeltaList (Kotlin Flow<Delta<T>>).
 /// Equivalent to Android's DeltaAdapter.
 ///
-/// Uses UICollectionViewDiffableDataSource under the hood for efficient updates.
-/// Manages lazy item lifecycle automatically.
+/// Uses UICollectionViewDiffableDataSource under the hood for efficient animated updates.
+///
+/// Usage:
+/// ```swift
+/// let dataSource = DeltaCollectionDataSource<Item>(
+///     collectionView: collectionView
+/// ) { collectionView, indexPath, item in
+///     let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "cell", for: indexPath)
+///     cell.textLabel?.text = item.title
+///     return cell
+/// }
+///
+/// dataSource.bind(to: viewModel.items)
+/// ```
+@available(iOS 14.0, *)
 @MainActor
-public class DeltaDataSource<T: Hashable>: NSObject, UICollectionViewDelegate {
+public class DeltaCollectionDataSource<T: AnyObject>: NSObject, UICollectionViewDelegate {
 
     // MARK: - Types
 
@@ -20,16 +35,18 @@ public class DeltaDataSource<T: Hashable>: NSObject, UICollectionViewDelegate {
     private var items: [T] = []
     private var shadowIds: [UUID] = []
     private var task: Task<Void, Never>?
-    private var lazyList: (any LazyList)?
 
     private let cellProvider: CellProvider
 
     /// The current items in the data source.
     public var currentItems: [T] { items }
 
+    /// Callback when items are updated.
+    public var onItemsChanged: (([T]) -> Void)?
+
     // MARK: - Initialization
 
-    /// Creates a new DeltaDataSource.
+    /// Creates a new DeltaCollectionDataSource.
     /// - Parameters:
     ///   - collectionView: The collection view to manage.
     ///   - cellProvider: Closure that provides cells for items.
@@ -58,14 +75,14 @@ public class DeltaDataSource<T: Hashable>: NSObject, UICollectionViewDelegate {
 
     // MARK: - Binding
 
-    /// Starts collecting deltas from the stream and applying them to the collection view.
+    /// Starts collecting deltas from a typed stream and applying them to the collection view.
     public func bind<S: AsyncSequence>(to stream: S) where S.Element == Delta<T> {
         unbind()
         task = Task { @MainActor in
             do {
                 for try await delta in stream {
                     if Task.isCancelled { break }
-                    applyDelta(delta)
+                    self.applyDelta(delta)
                 }
             } catch {
                 // Stream completed or was cancelled
@@ -73,46 +90,66 @@ public class DeltaDataSource<T: Hashable>: NSObject, UICollectionViewDelegate {
         }
     }
 
-    /// Starts collecting with lazy list support.
-    public func bind<S: AsyncSequence, L: LazyList>(to stream: S, lazyList: L) where S.Element == Delta<T>, L.Element == T {
-        self.lazyList = lazyList
-        bind(to: stream)
+    /// Starts collecting deltas from an erased stream (for type-erased Kotlin flows).
+    public func bind(erased stream: some AsyncSequence) {
+        unbind()
+        task = Task { @MainActor in
+            do {
+                for try await value in stream {
+                    if Task.isCancelled { break }
+                    if let delta = value as? Delta<T> {
+                        self.applyDelta(delta)
+                    }
+                }
+            } catch {
+                // Stream completed or was cancelled
+            }
+        }
     }
 
-    /// Stops collecting deltas and releases all lazy items.
+    /// Stops collecting deltas.
     public func unbind() {
         task?.cancel()
         task = nil
-        lazyList?.releaseAll()
     }
 
     // MARK: - Delta Application
 
     private func applyDelta(_ delta: Delta<T>) {
-        items = delta.items
+        // Convert Kotlin List to Swift Array
+        items = delta.items as! [T]
+        onItemsChanged?(items)
 
-        switch delta.change {
+        // Handle change type using SKIE's onEnum pattern
+        switch onEnum(of: delta.change) {
         case .reload:
             // Generate new shadow IDs for all items
-            shadowIds = delta.items.map { _ in UUID() }
+            shadowIds = items.map { _ in UUID() }
             applySnapshot(animatingDifferences: false)
 
-        case .mutations(let operations):
+        case .mutations(let mutations):
             // Apply mutations to shadow IDs
-            for mutation in operations {
-                switch mutation {
-                case .insert(let index, let count):
+            for operation in mutations.operations {
+                switch onEnum(of: operation) {
+                case .insert(let insert):
+                    let count = Int(insert.count)
+                    let index = Int(insert.index)
                     let newIds = (0..<count).map { _ in UUID() }
                     shadowIds.insert(contentsOf: newIds, at: index)
 
-                case .remove(let index, let count):
+                case .remove(let remove):
+                    let count = Int(remove.count)
+                    let index = Int(remove.index)
                     shadowIds.removeSubrange(index..<(index + count))
 
                 case .update:
-                    // Updates don't change IDs
+                    // Updates don't change IDs, just reconfigure cells
                     break
 
-                case .move(let fromIndex, let toIndex, let count):
+                case .move(let move):
+                    let count = Int(move.count)
+                    let fromIndex = Int(move.fromIndex)
+                    let toIndex = Int(move.toIndex)
                     let movedIds = Array(shadowIds[fromIndex..<(fromIndex + count)])
                     shadowIds.removeSubrange(fromIndex..<(fromIndex + count))
                     let insertIndex = fromIndex < toIndex ? toIndex - count : toIndex
@@ -133,22 +170,21 @@ public class DeltaDataSource<T: Hashable>: NSObject, UICollectionViewDelegate {
     // MARK: - Item Access
 
     /// Returns the item at the given index path.
-    public func item(at indexPath: IndexPath) -> T {
-        items[indexPath.item]
+    public func item(at indexPath: IndexPath) -> T? {
+        guard indexPath.item < items.count else { return nil }
+        return items[indexPath.item]
     }
 
-    /// Returns the item at the given index path as a SoftValue.
-    /// For regular lists, always returns .present.
-    public func softItem(at indexPath: IndexPath) -> SoftValue<T>? {
-        guard indexPath.item < items.count else { return nil }
-        return .present(items[indexPath.item])
+    /// Returns the item at the given index.
+    public func item(at index: Int) -> T? {
+        guard index < items.count else { return nil }
+        return items[index]
     }
 
     // MARK: - UICollectionViewDelegate
 
     public func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
-        // Release lazy items when they leave the viewport
-        lazyList?.release(index: indexPath.item)
+        // Subclasses can override to handle lazy item release
     }
 
     // MARK: - Supplementary Views
@@ -163,30 +199,40 @@ public class DeltaDataSource<T: Hashable>: NSObject, UICollectionViewDelegate {
     }
 }
 
-// MARK: - Stable Item Extension
-
-/// Extension for StableItem types that uses stable IDs directly.
+/// Data source that uses stable IDs from StableItem types directly.
+/// More efficient for lists using the withStableIds() operator.
+@available(iOS 14.0, *)
 @MainActor
-public class StableDeltaDataSource<T: StableItem & Hashable>: NSObject, UICollectionViewDelegate where T.Value: Hashable {
+public class StableDeltaCollectionDataSource<T: AnyObject>: NSObject, UICollectionViewDelegate {
 
     public typealias CellProvider = (UICollectionView, IndexPath, T) -> UICollectionViewCell?
 
     private weak var collectionView: UICollectionView?
-    private var diffableDataSource: UICollectionViewDiffableDataSource<Int, Int>!
+    private var diffableDataSource: UICollectionViewDiffableDataSource<Int, Int32>!
     private var items: [T] = []
-    private var itemsByStableId: [Int: T] = [:]
+    private var itemsByStableId: [Int32: T] = [:]
     private var task: Task<Void, Never>?
-    private var lazyList: (any LazyList)?
 
     private let cellProvider: CellProvider
+    private let stableIdExtractor: (T) -> Int32
 
     public var currentItems: [T] { items }
 
+    /// Callback when items are updated.
+    public var onItemsChanged: (([T]) -> Void)?
+
+    /// Creates a data source for items with stable IDs.
+    /// - Parameters:
+    ///   - collectionView: The collection view to manage.
+    ///   - stableIdExtractor: Closure that extracts the stable ID from an item.
+    ///   - cellProvider: Closure that provides cells for items.
     public init(
         collectionView: UICollectionView,
+        stableIdExtractor: @escaping (T) -> Int32,
         cellProvider: @escaping CellProvider
     ) {
         self.collectionView = collectionView
+        self.stableIdExtractor = stableIdExtractor
         self.cellProvider = cellProvider
         super.init()
 
@@ -195,7 +241,7 @@ public class StableDeltaDataSource<T: StableItem & Hashable>: NSObject, UICollec
     }
 
     private func setupDiffableDataSource(collectionView: UICollectionView) {
-        diffableDataSource = UICollectionViewDiffableDataSource<Int, Int>(
+        diffableDataSource = UICollectionViewDiffableDataSource<Int, Int32>(
             collectionView: collectionView
         ) { [weak self] collectionView, indexPath, stableId in
             guard let self = self,
@@ -210,7 +256,7 @@ public class StableDeltaDataSource<T: StableItem & Hashable>: NSObject, UICollec
             do {
                 for try await delta in stream {
                     if Task.isCancelled { break }
-                    applyDelta(delta)
+                    self.applyDelta(delta)
                 }
             } catch {
                 // Stream completed
@@ -218,38 +264,63 @@ public class StableDeltaDataSource<T: StableItem & Hashable>: NSObject, UICollec
         }
     }
 
-    public func bind<S: AsyncSequence, L: LazyList>(to stream: S, lazyList: L) where S.Element == Delta<T>, L.Element == T {
-        self.lazyList = lazyList
-        bind(to: stream)
+    public func bind(erased stream: some AsyncSequence) {
+        unbind()
+        task = Task { @MainActor in
+            do {
+                for try await value in stream {
+                    if Task.isCancelled { break }
+                    if let delta = value as? Delta<T> {
+                        self.applyDelta(delta)
+                    }
+                }
+            } catch {
+                // Stream completed
+            }
+        }
     }
 
     public func unbind() {
         task?.cancel()
         task = nil
-        lazyList?.releaseAll()
     }
 
     private func applyDelta(_ delta: Delta<T>) {
-        items = delta.items
-        itemsByStableId = Dictionary(uniqueKeysWithValues: items.map { ($0.stableId, $0) })
+        items = delta.items as! [T]
+        itemsByStableId = Dictionary(uniqueKeysWithValues: items.map { (stableIdExtractor($0), $0) })
+        onItemsChanged?(items)
 
-        var snapshot = NSDiffableDataSourceSnapshot<Int, Int>()
+        var snapshot = NSDiffableDataSourceSnapshot<Int, Int32>()
         snapshot.appendSections([0])
-        snapshot.appendItems(items.map { $0.stableId }, toSection: 0)
+        snapshot.appendItems(items.map { stableIdExtractor($0) }, toSection: 0)
 
-        let animating = delta.change != .reload
+        let animating: Bool
+        switch onEnum(of: delta.change) {
+        case .reload:
+            animating = false
+        case .mutations:
+            animating = true
+        }
+
         diffableDataSource.apply(snapshot, animatingDifferences: animating)
     }
 
-    public func item(at indexPath: IndexPath) -> T {
-        items[indexPath.item]
+    public func item(at indexPath: IndexPath) -> T? {
+        guard indexPath.item < items.count else { return nil }
+        return items[indexPath.item]
+    }
+
+    public func item(at index: Int) -> T? {
+        guard index < items.count else { return nil }
+        return items[index]
     }
 
     public func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
-        lazyList?.release(index: indexPath.item)
+        // Subclasses can override to handle lazy item release
     }
 
     deinit {
         task?.cancel()
     }
 }
+#endif

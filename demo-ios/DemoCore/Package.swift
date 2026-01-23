@@ -10,13 +10,23 @@ let package = Package(
     products: [
         .library(
             name: "DemoCore",
-            targets: ["DemoCore"]
+            targets: ["DemoCoreWrapper"]
         ),
     ],
     targets: [
         .binaryTarget(
             name: "DemoCore",
             path: "../../demo-core/build/XCFrameworks/debug/DemoCore.xcframework"
+        ),
+        .binaryTarget(
+            name: "DeltaListCore",
+            path: "../../deltalist-core/build/XCFrameworks/debug/DeltaListCore.xcframework"
+        ),
+        // Wrapper target that links both frameworks
+        .target(
+            name: "DemoCoreWrapper",
+            dependencies: ["DemoCore", "DeltaListCore"],
+            path: "Sources"
         ),
     ]
 )
