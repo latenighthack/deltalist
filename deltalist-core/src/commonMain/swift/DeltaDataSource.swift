@@ -157,6 +157,9 @@ public class DeltaCollectionDataSource<T: AnyObject>: NSObject,
 
         onItemsChanged?(items)
         applyChange(delta.change)
+
+        // Continue loading any visible cells that are still unloaded
+        triggerLoadsForVisibleCells()
     }
 
     private func applyDeltaErased(_ delta: Delta<AnyObject>) {
@@ -171,6 +174,9 @@ public class DeltaCollectionDataSource<T: AnyObject>: NSObject,
 
         onItemsChanged?(items)
         applyChange(delta.change)
+
+        // Continue loading any visible cells that are still unloaded
+        triggerLoadsForVisibleCells()
     }
 
     private func applyDeltaViaKVC(_ nsValue: NSObject) {
@@ -211,6 +217,7 @@ public class DeltaCollectionDataSource<T: AnyObject>: NSObject,
         if !hasReceivedInitialData {
             hasReceivedInitialData = true
             collectionView?.reloadData()
+            triggerLoadsForVisibleCells()
             return
         }
 
@@ -224,6 +231,9 @@ public class DeltaCollectionDataSource<T: AnyObject>: NSObject,
         } else {
             collectionView?.reloadData()
         }
+
+        // Continue loading any visible cells that are still unloaded
+        triggerLoadsForVisibleCells()
     }
 
     private func applyChange(_ change: Change) {
@@ -319,43 +329,57 @@ public class DeltaCollectionDataSource<T: AnyObject>: NSObject,
 
     /// Returns true if the item at the given index is loaded (for soft lists).
     public func isLoadedAt(index: Int) -> Bool {
-        guard let delta = currentDelta as? NSObject else { return index < items.count }
-
-        // Try calling isLoadedAt(index:) method
-        if delta.responds(to: Selector(("isLoadedAtIndex:"))) {
-            if let result = delta.perform(Selector(("isLoadedAtIndex:")), with: NSNumber(value: Int32(index)))?.takeUnretainedValue() as? NSNumber {
-                return result.boolValue
-            }
+        // Try calling directly on Delta<T>
+        if let delta = currentDelta as? Delta<T> {
+            return delta.isLoadedAt(index: Int32(index))
         }
-
+        // Try calling on Delta<AnyObject>
+        if let delta = currentDelta as? Delta<AnyObject> {
+            return delta.isLoadedAt(index: Int32(index))
+        }
         // Fallback: item is loaded if it's within the items array
         return index < items.count
     }
 
     /// Returns the loaded item at the given index, or nil if not loaded (for soft lists).
     public func getLoadedItemAt(index: Int) -> T? {
-        guard let delta = currentDelta as? NSObject else {
-            return index < items.count ? items[index] : nil
+        // Try calling directly on Delta<T>
+        if let delta = currentDelta as? Delta<T> {
+            return delta.getLoadedItemAt(index: Int32(index)) as? T
         }
-
-        // Try calling getLoadedItemAt(index:) method
-        if delta.responds(to: Selector(("getLoadedItemAtIndex:"))) {
-            if let result = delta.perform(Selector(("getLoadedItemAtIndex:")), with: NSNumber(value: Int32(index)))?.takeUnretainedValue() {
-                return result as? T
-            }
+        // Try calling on Delta<AnyObject>
+        if let delta = currentDelta as? Delta<AnyObject> {
+            return delta.getLoadedItemAt(index: Int32(index)) as? T
         }
-
         // Fallback
         return index < items.count ? items[index] : nil
     }
 
     /// Triggers loading at the given index (for soft lists).
     public func triggerLoadAt(index: Int) {
-        guard let delta = currentDelta as? NSObject else { return }
+        // Try calling directly on Delta<T>
+        if let delta = currentDelta as? Delta<T> {
+            delta.triggerLoadAt(index: Int32(index))
+            return
+        }
+        // Try calling on Delta<AnyObject>
+        if let delta = currentDelta as? Delta<AnyObject> {
+            delta.triggerLoadAt(index: Int32(index))
+            return
+        }
+    }
 
-        // Try calling triggerLoadAt(index:) method
-        if delta.responds(to: Selector(("triggerLoadAtIndex:"))) {
-            _ = delta.perform(Selector(("triggerLoadAtIndex:")), with: NSNumber(value: Int32(index)))
+    /// Triggers loading for all visible cells that are not yet loaded.
+    /// Call this after receiving new data to continue loading visible items.
+    private func triggerLoadsForVisibleCells() {
+        guard loadingCellProvider != nil else { return }  // Only for soft lists
+        guard let collectionView = collectionView else { return }
+
+        for indexPath in collectionView.indexPathsForVisibleItems {
+            let index = indexPath.item
+            if !isLoadedAt(index: index) {
+                triggerLoadAt(index: index)
+            }
         }
     }
 
