@@ -336,12 +336,45 @@ public class StableDeltaCollectionDataSource<T: AnyObject>: NSObject, UICollecti
                         }
 
                         self.diffableDataSource.apply(snapshot, animatingDifferences: animating)
+                    } else if let nsValue = value as? NSObject {
+                        // Cross-module: SKIE re-exports types with different names (e.g., DemoCoreDelta)
+                        // Use KVC to access properties
+                        self.applyDeltaViaKVC(nsValue)
                     }
                 }
             } catch {
                 // Stream completed
             }
         }
+    }
+
+    /// Extracts Delta data using Key-Value Coding for cross-module compatibility.
+    private func applyDeltaViaKVC(_ nsValue: NSObject) {
+        // Get items array
+        guard let itemsArray = nsValue.value(forKey: "items") as? [AnyObject] else {
+            return
+        }
+
+        // Get change object
+        guard let changeObj = nsValue.value(forKey: "change") else {
+            return
+        }
+
+        // Extract items
+        let extractedItems = itemsArray.compactMap { $0 as? T }
+        self.items = extractedItems
+        self.itemsByStableId = Dictionary(uniqueKeysWithValues: extractedItems.map { (self.stableIdExtractor($0), $0) })
+        self.onItemsChanged?(extractedItems)
+
+        var snapshot = NSDiffableDataSourceSnapshot<Int, Int32>()
+        snapshot.appendSections([0])
+        snapshot.appendItems(extractedItems.map { self.stableIdExtractor($0) }, toSection: 0)
+
+        // Determine if we should animate based on change type
+        let typeName = String(describing: type(of: changeObj))
+        let animating = !typeName.contains("Reload")
+
+        self.diffableDataSource.apply(snapshot, animatingDifferences: animating)
     }
 
     public func unbind() {
@@ -434,6 +467,7 @@ public class SectionedDeltaCollectionDataSource<H: AnyObject, T: AnyObject>: NSO
     private weak var collectionView: UICollectionView?
     private(set) public var sections: [SectionData] = []
     private var task: Task<Void, Never>?
+    private var hasReceivedInitialData = false
 
     private let cellProvider: CellProvider
     private let headerProvider: HeaderProvider?
@@ -468,21 +502,148 @@ public class SectionedDeltaCollectionDataSource<H: AnyObject, T: AnyObject>: NSO
     /// Binds to a SectionedDeltaList flow.
     public func bind(to flow: some AsyncSequence) {
         unbind()
+        hasReceivedInitialData = false
         task = Task { @MainActor [weak self] in
             do {
                 for try await value in flow {
                     if Task.isCancelled { break }
                     guard let self = self else { break }
 
-                    // Try to extract SectionedDelta
+                    // Try direct cast first (same module)
                     if let sectionedDelta = value as? SectionedDelta<H, T> {
                         self.applySectionedDelta(sectionedDelta)
                     } else if let sectionedDelta = value as? SectionedDelta<AnyObject, AnyObject> {
-                        // Handle type erasure across module boundaries
                         self.applySectionedDeltaErased(sectionedDelta)
+                    } else if let nsValue = value as? NSObject {
+                        // Cross-module: SKIE re-exports types with different names (e.g., DemoCoreSectionedDelta)
+                        // Use KVC to access properties
+                        self.applySectionedDeltaViaKVC(nsValue)
                     }
                 }
             } catch {}
+        }
+    }
+
+    /// Extracts SectionedDelta data using Key-Value Coding for cross-module compatibility.
+    private func applySectionedDeltaViaKVC(_ nsValue: NSObject) {
+        // Get sections array
+        guard let sectionsArray = nsValue.value(forKey: "sections") as? [AnyObject] else {
+            print("[SectionedDataSource] Could not extract sections via KVC")
+            return
+        }
+
+        // Get change object
+        guard let changeObj = nsValue.value(forKey: "change") else {
+            print("[SectionedDataSource] Could not extract change via KVC")
+            return
+        }
+
+        // Convert sections
+        let newSections = sectionsArray.compactMap { sectionObj -> SectionData? in
+            guard let section = sectionObj as? NSObject,
+                  let header = section.value(forKey: "header") as? H else {
+                return nil
+            }
+            let items = (section.value(forKey: "items") as? [AnyObject])?.compactMap { $0 as? T } ?? []
+            return SectionData(header: header, items: items)
+        }
+
+        // On first data, always reload to sync collection view state
+        if !hasReceivedInitialData {
+            hasReceivedInitialData = true
+            sections = newSections
+            onSectionsChanged?(newSections)
+            collectionView?.reloadData()
+            return
+        }
+
+        // Determine change type and apply
+        let typeName = String(describing: type(of: changeObj))
+
+        if typeName.contains("Reload") {
+            sections = newSections
+            onSectionsChanged?(newSections)
+            collectionView?.reloadData()
+        } else if typeName.contains("Sections"), let changeNS = changeObj as? NSObject {
+            // Section-level mutations
+            sections = newSections
+            onSectionsChanged?(newSections)
+
+            if let mutations = changeNS.value(forKey: "mutations") as? [AnyObject] {
+                collectionView?.performBatchUpdates {
+                    for mutation in mutations {
+                        guard let mutationNS = mutation as? NSObject else { continue }
+                        let mutationType = String(describing: type(of: mutation))
+
+                        if mutationType.contains("Insert") {
+                            let index = (mutationNS.value(forKey: "index") as? Int) ?? 0
+                            let count = (mutationNS.value(forKey: "count") as? Int) ?? 1
+                            collectionView?.insertSections(IndexSet(index..<(index + count)))
+                        } else if mutationType.contains("Remove") {
+                            let index = (mutationNS.value(forKey: "index") as? Int) ?? 0
+                            let count = (mutationNS.value(forKey: "count") as? Int) ?? 1
+                            collectionView?.deleteSections(IndexSet(index..<(index + count)))
+                        } else if mutationType.contains("Update") {
+                            let index = (mutationNS.value(forKey: "index") as? Int) ?? 0
+                            collectionView?.reloadSections(IndexSet(integer: index))
+                        } else if mutationType.contains("Move") {
+                            let fromIndex = (mutationNS.value(forKey: "fromIndex") as? Int) ?? 0
+                            let toIndex = (mutationNS.value(forKey: "toIndex") as? Int) ?? 0
+                            collectionView?.moveSection(fromIndex, toSection: toIndex)
+                        }
+                    }
+                }
+            } else {
+                collectionView?.reloadData()
+            }
+        } else if typeName.contains("Items"), let changeNS = changeObj as? NSObject {
+            // Item-level mutations
+            sections = newSections
+            onSectionsChanged?(newSections)
+
+            let sectionIndex = (changeNS.value(forKey: "section") as? Int) ?? 0
+            if let mutations = changeNS.value(forKey: "mutations") as? [AnyObject] {
+                collectionView?.performBatchUpdates {
+                    for mutation in mutations {
+                        guard let mutationNS = mutation as? NSObject else { continue }
+                        let mutationType = String(describing: type(of: mutation))
+
+                        if mutationType.contains("Insert") {
+                            let index = (mutationNS.value(forKey: "index") as? Int) ?? 0
+                            let count = (mutationNS.value(forKey: "count") as? Int) ?? 1
+                            let indexPaths = (0..<count).map { IndexPath(item: index + $0, section: sectionIndex) }
+                            collectionView?.insertItems(at: indexPaths)
+                        } else if mutationType.contains("Remove") {
+                            let index = (mutationNS.value(forKey: "index") as? Int) ?? 0
+                            let count = (mutationNS.value(forKey: "count") as? Int) ?? 1
+                            let indexPaths = (0..<count).map { IndexPath(item: index + $0, section: sectionIndex) }
+                            collectionView?.deleteItems(at: indexPaths)
+                        } else if mutationType.contains("Update") {
+                            let index = (mutationNS.value(forKey: "index") as? Int) ?? 0
+                            let count = (mutationNS.value(forKey: "count") as? Int) ?? 1
+                            let indexPaths = (0..<count).map { IndexPath(item: index + $0, section: sectionIndex) }
+                            collectionView?.reloadItems(at: indexPaths)
+                        } else if mutationType.contains("Move") {
+                            let fromIndex = (mutationNS.value(forKey: "fromIndex") as? Int) ?? 0
+                            let toIndex = (mutationNS.value(forKey: "toIndex") as? Int) ?? 0
+                            let count = (mutationNS.value(forKey: "count") as? Int) ?? 1
+                            for i in 0..<count {
+                                collectionView?.moveItem(
+                                    at: IndexPath(item: fromIndex + i, section: sectionIndex),
+                                    to: IndexPath(item: toIndex + i, section: sectionIndex)
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                collectionView?.reloadData()
+            }
+        } else {
+            // Unknown change type, just reload
+            sections = newSections
+            onSectionsChanged?(newSections)
+            collectionView?.reloadData()
         }
     }
 
@@ -518,6 +679,13 @@ public class SectionedDeltaCollectionDataSource<H: AnyObject, T: AnyObject>: NSO
         onSectionsChanged?(newSections)
 
         guard let collectionView = collectionView else { return }
+
+        // On first data, always reload to sync collection view state
+        if !hasReceivedInitialData {
+            hasReceivedInitialData = true
+            collectionView.reloadData()
+            return
+        }
 
         switch onEnum(of: change) {
         case .reload:
