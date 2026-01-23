@@ -158,26 +158,31 @@ extension DragDropViewController: UICollectionViewDropDelegate {
 
         // Update preview to final destination and commit
         viewModel.updateDragPreview(to: destIndex)
+
+        // IMPORTANT: Set isDragging to false BEFORE the async Task to prevent
+        // dropSessionDidEnd from calling cancelDrag() (which would race with commitDrag)
+        isDragging = false
+        dragSourceIndex = nil
+        dropDestinationIndex = nil
+
         Task {
             _ = await viewModel.commitDrag()
-            isDragging = false
-            dragSourceIndex = nil
-            dropDestinationIndex = nil
             // Trigger snapshot update now that drag is complete
             updateSnapshot(items: viewModel.items)
         }
     }
 
     func collectionView(_ collectionView: UICollectionView, dropSessionDidEnd session: UIDropSession) {
-        // Cancel the Kotlin drag if session ended without a drop
+        // Cancel the Kotlin drag only if the session ended without a successful drop.
+        // If performDropWith was called, isDragging will already be false.
         if isDragging {
             viewModel.cancelDrag()
+            isDragging = false
+            dragSourceIndex = nil
+            dropDestinationIndex = nil
+            // Trigger snapshot update since drag was cancelled
+            updateSnapshot(items: viewModel.items)
         }
-        isDragging = false
-        dragSourceIndex = nil
-        dropDestinationIndex = nil
-        // Trigger snapshot update in case drag was cancelled
-        updateSnapshot(items: viewModel.items)
     }
 }
 

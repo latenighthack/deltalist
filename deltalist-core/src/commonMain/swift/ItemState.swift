@@ -30,10 +30,11 @@ public struct ItemState<Value>: DynamicProperty {
     @StateObject private var observer: ItemStateObserver<Value>
 
     /// Initialize with an initial value and a flow that emits new values.
-    public init<S: AsyncSequence>(wrappedValue: Value, _ flow: @autoclosure @escaping () -> S) where S.Element == Value {
+    /// Uses runtime casting to handle SKIE module boundary type differences.
+    public init<S: AsyncSequence>(wrappedValue: Value, _ flow: @autoclosure @escaping () -> S) {
         self._observer = StateObject(wrappedValue: ItemStateObserver(
             initial: wrappedValue,
-            flow: { AnyValueAsyncSequence(flow()) }
+            flow: flow
         ))
     }
 
@@ -47,34 +48,42 @@ public struct ItemState<Value>: DynamicProperty {
 }
 
 /// Internal observer that manages the StateFlow collection lifecycle.
+/// Uses runtime casting to handle SKIE module boundary type differences.
 @available(iOS 14.0, macOS 11.0, tvOS 14.0, watchOS 7.0, *)
 @MainActor
 public class ItemStateObserver<Value>: ObservableObject {
     @Published public private(set) var value: Value
 
     private var task: Task<Void, Never>?
-    private let flowProvider: () -> AnyValueAsyncSequence<Value>
+    private var startFlow: (() -> Void)?
     private var isStarted = false
 
-    init(initial: Value, flow: @escaping () -> AnyValueAsyncSequence<Value>) {
+    public init<S: AsyncSequence>(initial: Value, flow: @escaping () -> S) {
         self.value = initial
-        self.flowProvider = flow
+
+        // Store the flow starter as a closure to avoid generic type issues
+        self.startFlow = { [weak self] in
+            guard let self = self else { return }
+            self.task = Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                do {
+                    for try await newValue in flow() {
+                        if Task.isCancelled { break }
+                        // Try direct cast first, then try common conversions
+                        if let v = newValue as? Value {
+                            self.value = v
+                        }
+                    }
+                } catch {}
+            }
+        }
         start()
     }
 
     private func start() {
         guard !isStarted else { return }
         isStarted = true
-
-        task = Task { @MainActor [weak self] in
-            guard let self = self else { return }
-            do {
-                for try await newValue in self.flowProvider() {
-                    if Task.isCancelled { break }
-                    self.value = newValue
-                }
-            } catch {}
-        }
+        startFlow?()
     }
 
     /// Pause observation (call when view goes off-screen).
@@ -101,35 +110,6 @@ public class ItemStateObserver<Value>: ObservableObject {
     }
 }
 
-/// Type-erased AsyncSequence for value types.
-public struct AnyValueAsyncSequence<Value>: AsyncSequence {
-    public typealias Element = Value
-    public typealias AsyncIterator = AnyValueAsyncIterator<Value>
-
-    private let makeIteratorClosure: () -> AnyValueAsyncIterator<Value>
-
-    public init<S: AsyncSequence>(_ sequence: S) where S.Element == Value {
-        makeIteratorClosure = {
-            AnyValueAsyncIterator(sequence.makeAsyncIterator())
-        }
-    }
-
-    public func makeAsyncIterator() -> AnyValueAsyncIterator<Value> {
-        makeIteratorClosure()
-    }
-}
-
-public struct AnyValueAsyncIterator<Value>: AsyncIteratorProtocol {
-    public typealias Element = Value
-
-    private let nextClosure: () async throws -> Value?
-
-    init<I: AsyncIteratorProtocol>(_ iterator: I) where I.Element == Value {
-        var iterator = iterator
-        nextClosure = { try await iterator.next() }
-    }
-
-    public mutating func next() async throws -> Value? {
-        try await nextClosure()
-    }
-}
+// NOTE: AnyValueAsyncSequence has been removed.
+// ItemStateObserver now uses generic AsyncSequence directly with runtime casting,
+// eliminating the need for type-erased wrappers.

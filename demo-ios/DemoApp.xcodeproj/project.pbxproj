@@ -18,9 +18,7 @@
 		001A00041 /* PaginatedListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00041 /* PaginatedListViewController.swift */; };
 		001A00042 /* SectionedListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00042 /* SectionedListViewController.swift */; };
 		001A00043 /* DragDropViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00043 /* DragDropViewController.swift */; };
-		001A00050 /* ListViewModelAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00050 /* ListViewModelAdapter.swift */; };
 		001A00051 /* PaginatedListViewModelAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00051 /* PaginatedListViewModelAdapter.swift */; };
-		001A00052 /* SectionedListViewModelAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00052 /* SectionedListViewModelAdapter.swift */; };
 		001A00053 /* DragDropViewModelAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00053 /* DragDropViewModelAdapter.swift */; };
 		001A00054 /* SharedTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00054 /* SharedTypes.swift */; };
 		001A00060 /* DemoCore in Frameworks */ = {isa = PBXBuildFile; productRef = 001B00060 /* DemoCore */; };
@@ -38,9 +36,7 @@
 		001B00041 /* PaginatedListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaginatedListViewController.swift; sourceTree = "<group>"; };
 		001B00042 /* SectionedListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionedListViewController.swift; sourceTree = "<group>"; };
 		001B00043 /* DragDropViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DragDropViewController.swift; sourceTree = "<group>"; };
-		001B00050 /* ListViewModelAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListViewModelAdapter.swift; sourceTree = "<group>"; };
 		001B00051 /* PaginatedListViewModelAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaginatedListViewModelAdapter.swift; sourceTree = "<group>"; };
-		001B00052 /* SectionedListViewModelAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionedListViewModelAdapter.swift; sourceTree = "<group>"; };
 		001B00053 /* DragDropViewModelAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DragDropViewModelAdapter.swift; sourceTree = "<group>"; };
 		001B00054 /* SharedTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedTypes.swift; sourceTree = "<group>"; };
 		001C00001 /* DemoApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DemoApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -105,9 +101,7 @@
 			isa = PBXGroup;
 			children = (
 				001B00054 /* SharedTypes.swift */,
-				001B00050 /* ListViewModelAdapter.swift */,
 				001B00051 /* PaginatedListViewModelAdapter.swift */,
-				001B00052 /* SectionedListViewModelAdapter.swift */,
 				001B00053 /* DragDropViewModelAdapter.swift */,
 			);
 			path = Adapters;
@@ -199,9 +193,7 @@
 				001A00001 /* DemoApp.swift in Sources */,
 				001A00002 /* ContentView.swift in Sources */,
 				001A00054 /* SharedTypes.swift in Sources */,
-				001A00050 /* ListViewModelAdapter.swift in Sources */,
 				001A00051 /* PaginatedListViewModelAdapter.swift in Sources */,
-				001A00052 /* SectionedListViewModelAdapter.swift in Sources */,
 				001A00053 /* DragDropViewModelAdapter.swift in Sources */,
 				001A00030 /* BasicListView.swift in Sources */,
 				001A00031 /* PaginatedListView.swift in Sources */,

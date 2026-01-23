@@ -1,25 +1,26 @@
 import UIKit
-import Combine
+import DemoCore
+import DeltaListCore
 
-/// UIKit implementation of the sectioned list demo using native UICollectionView sections.
+/// UIKit implementation of the sectioned list demo.
+/// Uses SectionedDeltaCollectionDataSource from DeltaListCore - NO DiffableDataSource!
 @MainActor
 class SectionedListViewController: UIViewController {
-    private let viewModel: SectionedListViewModelAdapter
+    private let viewModel: SectionedListViewModel
     private var collectionView: UICollectionView!
-    private var dataSource: UICollectionViewDiffableDataSource<String, String>!
-    private var cancellables = Set<AnyCancellable>()
+    private var dataSource: DeltaListCore.SectionedDeltaCollectionDataSource<SectionHeader, Item>!
 
     var selectedSectionIndex: Int = -1 {
         didSet {
             if oldValue != selectedSectionIndex {
-                updateSnapshot()
+                collectionView?.reloadData()
             }
         }
     }
 
     var onSectionSelected: ((Int) -> Void)?
 
-    init(viewModel: SectionedListViewModelAdapter) {
+    init(viewModel: SectionedListViewModel) {
         self.viewModel = viewModel
         super.init(nibName: nil, bundle: nil)
     }
@@ -32,7 +33,11 @@ class SectionedListViewController: UIViewController {
         super.viewDidLoad()
         setupCollectionView()
         setupDataSource()
-        bindViewModel()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        dataSource?.unbind()
     }
 
     private func setupCollectionView() {
@@ -40,8 +45,15 @@ class SectionedListViewController: UIViewController {
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         collectionView.backgroundColor = .systemBackground
-        collectionView.delegate = self
         view.addSubview(collectionView)
+
+        // Register cell and header
+        collectionView.register(SectionItemCell.self, forCellWithReuseIdentifier: "ItemCell")
+        collectionView.register(
+            SectionHeaderView.self,
+            forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader,
+            withReuseIdentifier: "Header"
+        )
     }
 
     private func createLayout() -> UICollectionViewLayout {
@@ -52,67 +64,34 @@ class SectionedListViewController: UIViewController {
     }
 
     private func setupDataSource() {
-        // Item cell registration
-        let itemRegistration = UICollectionView.CellRegistration<SectionItemCell, String> { [weak self] cell, indexPath, itemId in
-            guard let self = self,
-                  indexPath.section < self.viewModel.sections.count else { return }
-            let section = self.viewModel.sections[indexPath.section]
-            if let item = section.items.first(where: { $0.id == itemId }) {
+        // Create SectionedDeltaCollectionDataSource from DeltaListCore
+        dataSource = DeltaListCore.SectionedDeltaCollectionDataSource<SectionHeader, Item>(
+            collectionView: collectionView,
+            cellProvider: { [weak self] (collectionView: UICollectionView, indexPath: IndexPath, item: Item) -> UICollectionViewCell in
+                let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "ItemCell", for: indexPath) as! SectionItemCell
                 cell.configure(with: item)
+                return cell
+            },
+            headerProvider: { [weak self] (collectionView: UICollectionView, indexPath: IndexPath, header: SectionHeader) -> UICollectionReusableView in
+                let headerView = collectionView.dequeueReusableSupplementaryView(
+                    ofKind: UICollectionView.elementKindSectionHeader,
+                    withReuseIdentifier: "Header",
+                    for: indexPath
+                ) as! SectionHeaderView
+
+                let isSelected = indexPath.section == self?.selectedSectionIndex
+                headerView.configure(with: header, isSelected: isSelected)
+                headerView.setTapHandler { [weak self] in
+                    self?.onSectionSelected?(indexPath.section)
+                }
+                return headerView
             }
-        }
+        )
 
-        dataSource = UICollectionViewDiffableDataSource<String, String>(collectionView: collectionView) { collectionView, indexPath, itemId in
-            collectionView.dequeueConfiguredReusableCell(using: itemRegistration, for: indexPath, item: itemId)
-        }
-
-        // Section header registration
-        let headerRegistration = UICollectionView.SupplementaryRegistration<SectionHeaderView>(
-            elementKind: UICollectionView.elementKindSectionHeader
-        ) { [weak self] headerView, elementKind, indexPath in
-            guard let self = self,
-                  indexPath.section < self.viewModel.sections.count else { return }
-            let section = self.viewModel.sections[indexPath.section]
-            let isSelected = indexPath.section == self.selectedSectionIndex
-            headerView.configure(with: section.header, isSelected: isSelected)
-            headerView.setTapHandler { [weak self] in
-                self?.onSectionSelected?(indexPath.section)
-            }
-        }
-
-        dataSource.supplementaryViewProvider = { collectionView, kind, indexPath in
-            collectionView.dequeueConfiguredReusableSupplementary(using: headerRegistration, for: indexPath)
-        }
+        // Bind to Kotlin Flow
+        dataSource.bind(to: viewModel.sections)
     }
 
-    private func bindViewModel() {
-        viewModel.$sections
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.updateSnapshot()
-            }
-            .store(in: &cancellables)
-    }
-
-    private func updateSnapshot() {
-        var snapshot = NSDiffableDataSourceSnapshot<String, String>()
-
-        for section in viewModel.sections {
-            snapshot.appendSections([section.id])
-            snapshot.appendItems(section.items.map { $0.id }, toSection: section.id)
-        }
-
-        dataSource.apply(snapshot, animatingDifferences: true)
-    }
-}
-
-// MARK: - UICollectionViewDelegate
-
-extension SectionedListViewController: UICollectionViewDelegate {
-    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        collectionView.deselectItem(at: indexPath, animated: true)
-        // Item selection - could be extended if needed
-    }
 }
 
 // MARK: - Section Header View
@@ -148,9 +127,14 @@ private class SectionHeaderView: UICollectionReusableView {
         addGestureRecognizer(tapGesture)
     }
 
-    func configure(with header: SectionHeaderWrapper, isSelected: Bool) {
+    func configure(with header: SectionHeader, isSelected: Bool) {
         titleLabel.text = header.title
-        backgroundColor = UIColor(header.color).withAlphaComponent(isSelected ? 1.0 : 0.8)
+        // Convert ARGB Long to UIColor
+        let argb = UInt64(header.color)
+        let red = CGFloat((argb >> 16) & 0xFF) / 255.0
+        let green = CGFloat((argb >> 8) & 0xFF) / 255.0
+        let blue = CGFloat(argb & 0xFF) / 255.0
+        backgroundColor = UIColor(red: red, green: green, blue: blue, alpha: isSelected ? 1.0 : 0.8)
     }
 
     func setTapHandler(_ handler: @escaping () -> Void) {
@@ -202,7 +186,7 @@ private class SectionItemCell: UICollectionViewListCell {
         ])
     }
 
-    func configure(with item: ItemWrapper) {
+    func configure(with item: Item) {
         titleLabel.text = item.title
         idLabel.text = "ID: \(item.id.prefix(8))..."
     }

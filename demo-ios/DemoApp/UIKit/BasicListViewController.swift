@@ -1,19 +1,24 @@
 import UIKit
 import Combine
 import DemoCore
+import DeltaListCore
 
 /// UIKit implementation of the basic list demo using UICollectionView.
+/// Uses StableDeltaCollectionDataSource from DeltaListCore for simplified data binding.
+@available(iOS 14.0, *)
 @MainActor
 class BasicListViewController: UIViewController {
-    private let viewModel: ListViewModelAdapter
+    private let viewModel: ListViewModel
     private var collectionView: UICollectionView!
-    private var dataSource: UICollectionViewDiffableDataSource<Int, Int32>!
-    private var cancellables = Set<AnyCancellable>()
 
-    // Track cell state observers
-    private var cellTasks: [Int32: Task<Void, Never>] = [:]
+    // StableDeltaCollectionDataSource from DeltaListCore - handles diffing automatically!
+    // Use DemoCore.StableItem to disambiguate from DeltaListCore types
+    private var dataSource: DeltaListCore.StableDeltaCollectionDataSource<DemoCore.StableItem>!
 
-    init(viewModel: ListViewModelAdapter) {
+    // Track cell state observers for tick counts
+    private var cellObservers: [Int32: DeltaListCore.ItemStateObserver<DemoCore.KotlinInt>] = [:]
+
+    init(viewModel: ListViewModel) {
         self.viewModel = viewModel
         super.init(nibName: nil, bundle: nil)
     }
@@ -26,7 +31,16 @@ class BasicListViewController: UIViewController {
         super.viewDidLoad()
         setupCollectionView()
         setupDataSource()
-        bindViewModel()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // Perform main-actor cleanup here (deinit is nonisolated)
+        dataSource?.unbind()
+        for observer in cellObservers.values {
+            observer.pause()
+        }
+        cellObservers.removeAll()
     }
 
     private func setupCollectionView() {
@@ -34,7 +48,6 @@ class BasicListViewController: UIViewController {
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         collectionView.backgroundColor = .systemBackground
-        collectionView.delegate = self
         view.addSubview(collectionView)
     }
 
@@ -45,96 +58,79 @@ class BasicListViewController: UIViewController {
     }
 
     private func setupDataSource() {
-        let cellRegistration = UICollectionView.CellRegistration<TickingItemCell, TickingItemWrapper> { [weak self] cell, indexPath, tickingItem in
-            cell.configure(with: tickingItem)
+        let cellRegistration = UICollectionView.CellRegistration<TickingItemCell, DemoCore.StableItem> { [weak self] (cell: TickingItemCell, indexPath: IndexPath, stableItem: DemoCore.StableItem) in
+            guard let tickingItem = stableItem.value as? TickingItem else { return }
+            cell.configure(stableId: stableItem.stableId, tickingItem: tickingItem)
 
-            // Start observing tick count
-            self?.startStateObservation(for: tickingItem, cell: cell)
+            // Start observing tick count using ItemStateObserver from DeltaListCore
+            self?.startStateObservation(for: stableItem.stableId, tickingItem: tickingItem, cell: cell)
         }
 
-        dataSource = UICollectionViewDiffableDataSource<Int, Int32>(collectionView: collectionView) { [weak self] collectionView, indexPath, stableId in
-            guard let self = self,
-                  let tickingItem = self.viewModel.tickingItems.first(where: { $0.stableId == stableId }) else {
-                return nil
-            }
-            return collectionView.dequeueConfiguredReusableCell(using: cellRegistration, for: indexPath, item: tickingItem)
+        // Use StableDeltaCollectionDataSource from DeltaListCore
+        dataSource = DeltaListCore.StableDeltaCollectionDataSource<DemoCore.StableItem>(
+            collectionView: collectionView,
+            stableIdExtractor: { (item: DemoCore.StableItem) -> Int32 in item.stableId }
+        ) { (collectionView: UICollectionView, indexPath: IndexPath, item: DemoCore.StableItem) -> UICollectionViewCell? in
+            collectionView.dequeueConfiguredReusableCell(using: cellRegistration, for: indexPath, item: item)
         }
+
+        // Bind to the flow - one line! No manual snapshot management!
+        dataSource.bind(erased: viewModel.tickingItems)
     }
 
-    private func bindViewModel() {
-        viewModel.$tickingItems
+    func updateItems(_ items: [DemoCore.StableItem]) {
+        // External updates are handled automatically by the data source binding
+        // This method is kept for compatibility with the SwiftUI wrapper
+    }
+
+    // MARK: - State Observation using DeltaListCore
+
+    private func startStateObservation(for stableId: Int32, tickingItem: TickingItem, cell: TickingItemCell) {
+        // Cancel existing observer for this item
+        cellObservers[stableId]?.pause()
+
+        // Create a new ItemStateObserver from DeltaListCore
+        // The updated API accepts any AsyncSequence directly, no wrapper needed
+        let observer = DeltaListCore.ItemStateObserver<DemoCore.KotlinInt>(
+            initial: DemoCore.KotlinInt(int: 0),
+            flow: { tickingItem.tickCount }
+        )
+
+        cellObservers[stableId] = observer
+
+        // Observe changes using Combine
+        observer.$value
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] items in
-                self?.updateSnapshot(items: items)
+            .sink { [weak cell] (newValue: DemoCore.KotlinInt) in
+                cell?.updateTickCount(Int(newValue.intValue))
             }
-            .store(in: &cancellables)
-    }
-
-    private func updateSnapshot(items: [TickingItemWrapper]) {
-        var snapshot = NSDiffableDataSourceSnapshot<Int, Int32>()
-        snapshot.appendSections([0])
-        snapshot.appendItems(items.map { $0.stableId }, toSection: 0)
-        dataSource.apply(snapshot, animatingDifferences: true)
-    }
-
-    func updateItems(_ items: [TickingItemWrapper]) {
-        updateSnapshot(items: items)
-    }
-
-    // MARK: - State Observation
-
-    private func startStateObservation(for tickingItem: TickingItemWrapper, cell: TickingItemCell) {
-        let stableId = tickingItem.stableId
-
-        // Cancel existing task for this item
-        cellTasks[stableId]?.cancel()
-
-        // Start new observation task using Combine
-        cellTasks[stableId] = Task { @MainActor in
-            for await tickCount in tickingItem.$tickCount.values {
-                if Task.isCancelled { break }
-                cell.updateTickCount(Int(tickCount))
-            }
-        }
+            .store(in: &cell.cancellables)
     }
 
     private func stopStateObservation(for stableId: Int32) {
-        cellTasks[stableId]?.cancel()
-        cellTasks.removeValue(forKey: stableId)
+        cellObservers[stableId]?.pause()
+        cellObservers.removeValue(forKey: stableId)
     }
 
     deinit {
-        for task in cellTasks.values {
-            task.cancel()
-        }
-    }
-}
-
-// MARK: - UICollectionViewDelegate
-
-extension BasicListViewController: UICollectionViewDelegate {
-    func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
-        // Resume observation when item scrolls into view
-        if let tickingItem = viewModel.tickingItems[safe: indexPath.item] {
-            tickingItem.resumeObservation()
-        }
-    }
-
-    func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
-        // Pause observation when item scrolls out of view
-        if let tickingItem = viewModel.tickingItems[safe: indexPath.item] {
-            stopStateObservation(for: tickingItem.stableId)
-            tickingItem.pauseObservation()
+        // deinit is nonisolated; schedule main-actor cleanup if we somehow missed viewWillDisappear
+        Task { @MainActor [dataSource, cellObservers] in
+            dataSource?.unbind()
+            for observer in cellObservers.values {
+                observer.pause()
+            }
         }
     }
 }
 
 // MARK: - Ticking Item Cell
 
+@available(iOS 14.0, *)
 private class TickingItemCell: UICollectionViewListCell {
     private var titleLabel: UILabel!
     private var tickLabel: UILabel!
     private var stableId: Int32 = 0
+    var cancellables = Set<AnyCancellable>()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -143,6 +139,11 @@ private class TickingItemCell: UICollectionViewListCell {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        cancellables.removeAll()
     }
 
     private func setupViews() {
@@ -170,21 +171,13 @@ private class TickingItemCell: UICollectionViewListCell {
         ])
     }
 
-    func configure(with tickingItem: TickingItemWrapper) {
-        self.stableId = tickingItem.stableId
+    func configure(stableId: Int32, tickingItem: TickingItem) {
+        self.stableId = stableId
         titleLabel.text = tickingItem.item.title
-        tickLabel.text = "Ticks: \(tickingItem.tickCount) | StableId: \(stableId)"
+        tickLabel.text = "Ticks: 0 | StableId: \(stableId)"
     }
 
     func updateTickCount(_ count: Int) {
         tickLabel.text = "Ticks: \(count) | StableId: \(stableId)"
-    }
-}
-
-// MARK: - Array Extension
-
-private extension Array {
-    subscript(safe index: Index) -> Element? {
-        indices.contains(index) ? self[index] : nil
     }
 }

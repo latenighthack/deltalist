@@ -23,7 +23,7 @@ kotlin {
     ).forEach { target ->
         target.binaries.framework {
             baseName = "DeltaListCore"
-            isStatic = true
+            isStatic = false
             xcf.add(this)
         }
     }

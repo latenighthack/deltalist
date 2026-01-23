@@ -1,8 +1,15 @@
 import SwiftUI
+import DemoCore
 
 /// Sectioned list demo screen with headers and items.
+/// Uses Kotlin ViewModel directly with a simple observer for flow collection.
 struct SectionedListView: View {
-    @StateObject private var viewModel = SectionedListViewModelAdapter()
+    // Use Kotlin ViewModel directly - no adapter needed!
+    private let viewModel = SectionedListViewModel()
+
+    // Simple observer for flow collection
+    @StateObject private var sectionsObserver = SectionsObserver()
+
     @State private var selectedTab = 0
     @State private var selectedSectionIndex: Int? = nil
     @State private var selectedItemIndex: Int? = nil
@@ -21,29 +28,77 @@ struct SectionedListView: View {
             if selectedTab == 0 {
                 SectionedSwiftUIContent(
                     viewModel: viewModel,
+                    sections: sectionsObserver.sections,
                     selectedSectionIndex: $selectedSectionIndex,
                     selectedItemIndex: $selectedItemIndex
                 )
             } else {
-                SectionedUIKitContent(viewModel: viewModel)
+                SectionedUIKitContent(
+                    viewModel: viewModel,
+                    sections: sectionsObserver.sections
+                )
             }
         }
         .navigationTitle("Sectioned List")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            sectionsObserver.bind(to: viewModel.sections)
+        }
+        .onDisappear {
+            sectionsObserver.unbind()
+        }
+    }
+}
+
+// MARK: - Sections Observer
+
+/// Simple observer for sectioned list flow collection.
+@MainActor
+class SectionsObserver: ObservableObject {
+    @Published private(set) var sections: [ItemSectionWrapper] = []
+
+    private var task: Task<Void, Never>?
+
+    func bind(to flow: some AsyncSequence) {
+        unbind()
+        task = Task { @MainActor [weak self] in
+            do {
+                for try await delta in flow {
+                    if Task.isCancelled { break }
+                    guard let self = self else { break }
+                    // Extract sections from SectionedDelta
+                    if let sectionedDelta = delta as? SectionedDelta<SectionHeader, Item> {
+                        self.sections = sectionedDelta.sections.compactMap { section in
+                            ItemSectionWrapper(kotlinSection: section)
+                        }
+                    }
+                }
+            } catch {}
+        }
+    }
+
+    func unbind() {
+        task?.cancel()
+        task = nil
+    }
+
+    deinit {
+        task?.cancel()
     }
 }
 
 // MARK: - SwiftUI Content
 
 private struct SectionedSwiftUIContent: View {
-    @ObservedObject var viewModel: SectionedListViewModelAdapter
+    let viewModel: SectionedListViewModel
+    let sections: [ItemSectionWrapper]
     @Binding var selectedSectionIndex: Int?
     @Binding var selectedItemIndex: Int?
 
     var body: some View {
         VStack(spacing: 0) {
             List {
-                ForEach(Array(viewModel.sections.enumerated()), id: \.element.id) { sectionIndex, section in
+                ForEach(Array(sections.enumerated()), id: \.element.id) { sectionIndex, section in
                     Section {
                         ForEach(Array(section.items.enumerated()), id: \.element.id) { itemIndex, item in
                             SectionItemRow(
@@ -80,6 +135,7 @@ private struct SectionedSwiftUIContent: View {
             // Control buttons
             SectionedControlButtons(
                 viewModel: viewModel,
+                sections: sections,
                 selectedSectionIndex: $selectedSectionIndex,
                 selectedItemIndex: $selectedItemIndex
             )
@@ -137,7 +193,8 @@ private struct SectionItemRow: View {
 // MARK: - Control Buttons
 
 private struct SectionedControlButtons: View {
-    @ObservedObject var viewModel: SectionedListViewModelAdapter
+    let viewModel: SectionedListViewModel
+    let sections: [ItemSectionWrapper]
     @Binding var selectedSectionIndex: Int?
     @Binding var selectedItemIndex: Int?
 
@@ -152,7 +209,7 @@ private struct SectionedControlButtons: View {
                 if selectedSectionIndex != nil {
                     Button("- Section") {
                         if let index = selectedSectionIndex {
-                            viewModel.removeSection(at: index)
+                            viewModel.removeSection(index: Int32(index))
                             selectedSectionIndex = nil
                             selectedItemIndex = nil
                         }
@@ -172,13 +229,13 @@ private struct SectionedControlButtons: View {
             HStack {
                 if let sectionIndex = selectedSectionIndex {
                     Button("+ Item") {
-                        viewModel.addItemToSection(sectionIndex)
+                        viewModel.addItemToSection(sectionIndex: Int32(sectionIndex))
                     }
                     .buttonStyle(.bordered)
 
                     if let itemIndex = selectedItemIndex {
                         Button("- Item") {
-                            viewModel.removeItemFromSection(sectionIndex, itemIndex: itemIndex)
+                            viewModel.removeItemFromSection(sectionIndex: Int32(sectionIndex), itemIndex: Int32(itemIndex))
                             selectedItemIndex = nil
                         }
                         .buttonStyle(.bordered)
@@ -187,15 +244,15 @@ private struct SectionedControlButtons: View {
 
                     if sectionIndex > 0 {
                         Button("Move Up") {
-                            viewModel.moveSection(from: sectionIndex, to: sectionIndex - 1)
+                            viewModel.moveSection(fromIndex: Int32(sectionIndex), toIndex: Int32(sectionIndex - 1))
                             selectedSectionIndex = sectionIndex - 1
                         }
                         .buttonStyle(.bordered)
                     }
 
-                    if sectionIndex < viewModel.sections.count - 1 {
+                    if sectionIndex < sections.count - 1 {
                         Button("Move Down") {
-                            viewModel.moveSection(from: sectionIndex, to: sectionIndex + 1)
+                            viewModel.moveSection(fromIndex: Int32(sectionIndex), toIndex: Int32(sectionIndex + 1))
                             selectedSectionIndex = sectionIndex + 1
                         }
                         .buttonStyle(.bordered)
@@ -211,7 +268,8 @@ private struct SectionedControlButtons: View {
 // MARK: - UIKit Content
 
 private struct SectionedUIKitContent: View {
-    @ObservedObject var viewModel: SectionedListViewModelAdapter
+    let viewModel: SectionedListViewModel
+    let sections: [ItemSectionWrapper]
     @State private var selectedSectionIndex: Int = -1
 
     var body: some View {
@@ -222,15 +280,15 @@ private struct SectionedUIKitContent: View {
             )
 
             // Section action buttons
-            if selectedSectionIndex >= 0 && selectedSectionIndex < viewModel.sections.count {
+            if selectedSectionIndex >= 0 && selectedSectionIndex < sections.count {
                 HStack {
                     Button("Add Item") {
-                        viewModel.addItemToSection(selectedSectionIndex)
+                        viewModel.addItemToSection(sectionIndex: Int32(selectedSectionIndex))
                     }
                     .buttonStyle(.bordered)
 
                     Button("Remove Section") {
-                        viewModel.removeSection(at: selectedSectionIndex)
+                        viewModel.removeSection(index: Int32(selectedSectionIndex))
                         selectedSectionIndex = -1
                     }
                     .buttonStyle(.bordered)
@@ -245,7 +303,7 @@ private struct SectionedUIKitContent: View {
 // MARK: - UIViewControllerRepresentable
 
 private struct SectionedListViewControllerRepresentable: UIViewControllerRepresentable {
-    let viewModel: SectionedListViewModelAdapter
+    let viewModel: SectionedListViewModel
     @Binding var selectedSectionIndex: Int
 
     func makeUIViewController(context: Context) -> SectionedListViewController {
