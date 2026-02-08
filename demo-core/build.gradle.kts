@@ -15,6 +15,10 @@ skie {
 kotlin {
     jvm()
 
+    js(IR) {
+        browser()
+    }
+
     val xcf = XCFramework("DemoCore")
 
     listOf(

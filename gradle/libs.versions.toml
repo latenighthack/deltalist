@@ -8,6 +8,7 @@ activity = "1.9.3"
 recyclerview = "1.3.2"
 reorderable = "2.4.3"
 skie = "0.10.9"
+kotlin-wrappers-bom = "2025.6.9"
 
 [libraries]
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
@@ -34,6 +35,11 @@ androidx-recyclerview = { module = "androidx.recyclerview:recyclerview", version
 
 # Compose utilities
 compose-reorderable = { module = "sh.calvin.reorderable:reorderable", version.ref = "reorderable" }
+
+# React / JS
+kotlin-wrappers-bom = { module = "org.jetbrains.kotlin-wrappers:kotlin-wrappers-bom", version.ref = "kotlin-wrappers-bom" }
+kotlin-react = { module = "org.jetbrains.kotlin-wrappers:kotlin-react" }
+kotlin-react-dom = { module = "org.jetbrains.kotlin-wrappers:kotlin-react-dom" }
 
 # Testing
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
