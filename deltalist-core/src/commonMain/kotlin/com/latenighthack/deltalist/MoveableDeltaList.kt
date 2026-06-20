@@ -1,5 +1,6 @@
 package com.latenighthack.deltalist
 
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -221,6 +222,12 @@ internal class MoveableDeltaListImpl<T>(
                 revert()
                 false
             }
+        } catch (e: CancellationException) {
+            // The commit coroutine was cancelled (e.g. the collecting scope tore down mid-save).
+            // Restore drag state before honoring cancellation so the list can't strand in
+            // Committing — a stranded Committing rejects every future beginDrag.
+            revert()
+            throw e
         } catch (e: Exception) {
             revert()
             false
@@ -259,6 +266,12 @@ internal class MoveableDeltaListImpl<T>(
                 revert()
                 false
             }
+        } catch (e: CancellationException) {
+            // The commit coroutine was cancelled (e.g. the collecting scope tore down mid-save).
+            // Restore drag state before honoring cancellation so the list can't strand in
+            // Committing — a stranded Committing rejects every future beginDrag.
+            revert()
+            throw e
         } catch (e: Exception) {
             revert()
             false

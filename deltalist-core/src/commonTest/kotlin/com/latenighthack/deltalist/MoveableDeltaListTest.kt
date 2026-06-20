@@ -1,6 +1,9 @@
 package com.latenighthack.deltalist
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -208,6 +211,33 @@ class MoveableDeltaListTest {
         assertEquals("A", committingState.item)
         assertEquals(0, committingState.fromIndex)
         assertEquals(2, committingState.toIndex)
+    }
+
+    @Test
+    fun `commitDrag restores Idle when cancelled mid-commit`() = runTest {
+        val source = mutableDeltaListOf(listOf("A", "B", "C"))
+        val onMoveEntered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val moveable = source.moveable { _, _, _ ->
+            onMoveEntered.complete(Unit)
+            release.await() // suspend inside the commit until the coroutine is cancelled
+            true
+        }
+
+        moveable.first()
+        moveable.beginDrag(0)
+        moveable.updateDragPreview(2)
+
+        val job = launch { moveable.commitDrag() }
+        onMoveEntered.await()
+        assertIs<DragState.Committing<String>>(moveable.dragState.value)
+
+        // Cancelling mid-save must not strand the list in Committing, which would reject
+        // every future beginDrag.
+        job.cancelAndJoin()
+
+        assertIs<DragState.Idle>(moveable.dragState.value)
+        assertTrue(moveable.beginDrag(0))
     }
 
     @Test
