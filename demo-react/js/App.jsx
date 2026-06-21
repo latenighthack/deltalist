@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { List, AutoSizer } from 'react-virtualized';
+import { List, AutoSizer, CellMeasurer, CellMeasurerCache } from 'react-virtualized';
 import { useDeltaList, useSoftDeltaList, useFlow } from 'demo-core';
 
 // --- Basic List Demo ---
@@ -111,8 +111,6 @@ function SectionedListDemo({ vm }) {
 
 // --- Paginated List Demo ---
 
-const PAGINATED_ROW_HEIGHT = 52;
-
 // A not-yet-loaded row. Triggers the fetch on appear (mirrors iOS .onAppear /
 // Android's soft.request() in the row body). Because the list is virtualized, only
 // rows scrolled into view mount, so only visible placeholders drive pagination.
@@ -135,27 +133,39 @@ function PaginatedListDemo({ vm }) {
     const excludeDivisors = useFlow(vm.excludeDivisors, []);
     const listRef = useRef(null);
 
+    // Rows self-measure their height; the cache stores each measured height so the List
+    // can position rows without a hardcoded rowHeight. Width is fixed, only height varies.
+    const cacheRef = useRef(null);
+    if (cacheRef.current === null) {
+        cacheRef.current = new CellMeasurerCache({ fixedWidth: true, defaultHeight: 52 });
+    }
+    const cache = cacheRef.current;
+
     // react-virtualized caches rendered cells; re-render the visible window whenever a
     // new delta snapshot arrives so loaded values replace their placeholders.
     useEffect(() => {
         if (listRef.current) listRef.current.forceUpdateGrid();
     }, [list]);
 
-    const rowRenderer = useCallback(({ index, key, style }) => {
+    const rowRenderer = useCallback(({ index, key, parent, style }) => {
         const cell = list.get(index);
         return (
-            <div key={key} style={style}>
-                {cell.loaded ? (
-                    <div className="item-card">
-                        <span className="item-title">#{cell.value}</span>
-                        <span className="item-id">index: {index}</span>
+            <CellMeasurer cache={cache} columnIndex={0} key={key} parent={parent} rowIndex={index}>
+                {({ registerChild }) => (
+                    <div ref={registerChild} style={{ ...style, paddingBottom: 6 }}>
+                        {cell.loaded ? (
+                            <div className="item-card">
+                                <span className="item-title">#{cell.value}</span>
+                                <span className="item-id">index: {index}</span>
+                            </div>
+                        ) : (
+                            <PaginatedLoadingRow index={index} request={cell.request} />
+                        )}
                     </div>
-                ) : (
-                    <PaginatedLoadingRow index={index} request={cell.request} />
                 )}
-            </div>
+            </CellMeasurer>
         );
-    }, [list]);
+    }, [list, cache]);
 
     const divisors = [2, 3, 5, 7, 11];
 
@@ -176,7 +186,8 @@ function PaginatedListDemo({ vm }) {
                             width={width}
                             height={height}
                             rowCount={list.size}
-                            rowHeight={PAGINATED_ROW_HEIGHT}
+                            deferredMeasurementCache={cache}
+                            rowHeight={cache.rowHeight}
                             rowRenderer={rowRenderer}
                             overscanRowCount={5}
                         />

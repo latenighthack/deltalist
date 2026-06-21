@@ -244,7 +244,7 @@ private fun PaginatedStatusBar(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "Paginated List (10,000 items)",
+                text = "Paginated List",
                 style = MaterialTheme.typography.titleMedium
             )
             Text(
