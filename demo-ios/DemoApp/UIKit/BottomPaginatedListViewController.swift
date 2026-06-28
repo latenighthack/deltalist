@@ -1,16 +1,17 @@
 import UIKit
 import DemoCore
-//import DeltaListCore
 
-/// UIKit implementation of the paginated list demo.
-/// Uses DeltaCollectionDataSource with soft list support.
+/// UIKit implementation of the bottom-anchored ("chat-style") paginated list demo.
+/// Uses DeltaCollectionDataSource with soft list support; starts scrolled to the bottom and
+/// renders not-yet-loaded slots as skeleton cells.
 @MainActor
-class PaginatedListViewController: UIViewController {
-    private let viewModel: PaginatedListViewModel
+class BottomPaginatedListViewController: UIViewController {
+    private let viewModel: BottomPaginatedListViewModel
     private var collectionView: UICollectionView!
     private var dataSource: DeltaCollectionDataSource<KotlinInt>!
+    private var didInitialScroll = false
 
-    init(viewModel: PaginatedListViewModel) {
+    init(viewModel: BottomPaginatedListViewModel) {
         self.viewModel = viewModel
         super.init(nibName: nil, bundle: nil)
     }
@@ -45,34 +46,47 @@ class PaginatedListViewController: UIViewController {
     }
 
     private func setupDataSource() {
-        // Register cells
-        let numberCellRegistration = UICollectionView.CellRegistration<NumberCell, KotlinInt> { cell, indexPath, value in
+        let numberCellRegistration = UICollectionView.CellRegistration<BottomNumberCell, KotlinInt> { cell, indexPath, value in
             cell.configure(number: value.intValue, index: indexPath.item)
         }
 
-        let loadingCellRegistration = UICollectionView.CellRegistration<LoadingCell, Void> { cell, indexPath, _ in
-            cell.configure(index: indexPath.item)
-        }
+        let skeletonCellRegistration = UICollectionView.CellRegistration<SkeletonCell, Void> { _, _, _ in }
 
-        // Create data source with soft list support
         dataSource = DeltaCollectionDataSource<KotlinInt>(
             collectionView: collectionView,
             cellProvider: { collectionView, indexPath, value in
                 collectionView.dequeueConfiguredReusableCell(using: numberCellRegistration, for: indexPath, item: value)
             },
             loadingCellProvider: { collectionView, indexPath in
-                collectionView.dequeueConfiguredReusableCell(using: loadingCellRegistration, for: indexPath, item: ())
+                collectionView.dequeueConfiguredReusableCell(using: skeletonCellRegistration, for: indexPath, item: ())
             }
         )
 
-        // Bind to the paginated flow
-        dataSource.bind(erased: viewModel.paginatedNumbers)
+        // Anchor at the bottom as soon as the estimated size is known (the bottom rows are
+        // skeletons that then fill in there). Dispatched async so it runs after the data source
+        // has reloaded the collection view for the first snapshot.
+        dataSource.onItemsChanged = { [weak self] _ in
+            guard let self = self, !self.didInitialScroll, self.dataSource.totalSize > 1 else { return }
+            self.didInitialScroll = true
+            DispatchQueue.main.async { [weak self] in
+                self?.scrollToBottom(animated: false)
+            }
+        }
+
+        dataSource.bind(erased: viewModel.messages)
+    }
+
+    /// Scrolls to the last row. Used for the initial bottom anchor and after "add at bottom".
+    func scrollToBottom(animated: Bool) {
+        let count = dataSource.totalSize
+        guard count > 0 else { return }
+        collectionView.scrollToItem(at: IndexPath(item: count - 1, section: 0), at: .bottom, animated: animated)
     }
 }
 
 // MARK: - Number Cell
 
-private class NumberCell: UICollectionViewListCell {
+private class BottomNumberCell: UICollectionViewListCell {
     private var numberLabel: UILabel!
     private var indexLabel: UILabel!
 
@@ -111,15 +125,22 @@ private class NumberCell: UICollectionViewListCell {
     }
 
     func configure(number: Int, index: Int) {
-        numberLabel.text = "#\(number)"
+        // Manually-added items use negative values; render them distinctly.
+        if number < 0 {
+            numberLabel.text = "Added #\(-number)"
+            numberLabel.textColor = .tintColor
+        } else {
+            numberLabel.text = "#\(number)"
+            numberLabel.textColor = .label
+        }
         indexLabel.text = "index: \(index)"
     }
 }
 
-// MARK: - Loading Cell
+// MARK: - Skeleton Cell
 
 /// A not-yet-loaded slot rendered as a skeleton item (no spinner, no text).
-private class LoadingCell: UICollectionViewListCell {
+private class SkeletonCell: UICollectionViewListCell {
     private var bar: UIView!
 
     override init(frame: CGRect) {
@@ -145,9 +166,5 @@ private class LoadingCell: UICollectionViewListCell {
             bar.widthAnchor.constraint(equalToConstant: 120),
             bar.heightAnchor.constraint(equalToConstant: 22)
         ])
-    }
-
-    func configure(index: Int) {
-        // No-op: a skeleton placeholder has no per-index content.
     }
 }

@@ -120,14 +120,13 @@ private struct NumberItemRow: View {
 
 // MARK: - Loading Row
 
+/// A not-yet-loaded slot rendered as a skeleton item (no spinner, no text).
 private struct LoadingRow: View {
     var body: some View {
         HStack {
-            ProgressView()
-                .padding(.trailing, 8)
-
-            Text("Loading...")
-                .foregroundColor(.secondary)
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color(.systemGray5))
+                .frame(width: 120, height: 22)
 
             Spacer()
         }

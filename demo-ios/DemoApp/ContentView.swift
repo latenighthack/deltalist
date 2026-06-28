@@ -35,6 +35,13 @@ struct ContentView: View {
                         )
                     }
 
+                    NavigationLink(destination: BottomPaginatedListView()) {
+                        DemoButton(
+                            title: "Bottom Paginated List Demo",
+                            description: "Chat-style: loads bottom first, add top/bottom"
+                        )
+                    }
+
                     NavigationLink(destination: SectionedListView()) {
                         DemoButton(
                             title: "Sectioned List Demo",

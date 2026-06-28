@@ -8,9 +8,6 @@ class DragDropViewController: UIViewController {
     private let viewModel: DragDropViewModel
     private var collectionView: UICollectionView!
     private var dataSource: DeltaCollectionDataSource<Item>!
-    private var dragSourceIndex: Int?
-    private var dropDestinationIndex: Int?
-    private var isDragging: Bool = false
 
     init(viewModel: DragDropViewModel) {
         self.viewModel = viewModel
@@ -25,7 +22,6 @@ class DragDropViewController: UIViewController {
         super.viewDidLoad()
         setupCollectionView()
         setupDataSource()
-        setupDragAndDrop()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -60,130 +56,16 @@ class DragDropViewController: UIViewController {
             }
         )
 
-        // Bind using the MoveableDeltaList extension (handles FlowCollector internally)
-        dataSource.bind(moveable: viewModel.items)
-    }
-
-    private func setupDragAndDrop() {
-        collectionView.dragDelegate = self
-        collectionView.dropDelegate = self
-        collectionView.dragInteractionEnabled = true
+        // Bind the moveable list and let the binding layer own drag-and-drop. The data source
+        // installs the drag/drop delegates and guarantees the drag lifecycle, so this controller
+        // never wires UICollectionView drag handling by hand.
+        dataSource.bind(moveable: viewModel.items, draggingIn: collectionView)
     }
 
     // MARK: - Helpers
 
     private func canMove(item: Item) -> Bool {
         !item.title.contains("Pinned")
-    }
-}
-
-// MARK: - UICollectionViewDragDelegate
-
-extension DragDropViewController: UICollectionViewDragDelegate {
-    func collectionView(_ collectionView: UICollectionView, itemsForBeginning session: UIDragSession, at indexPath: IndexPath) -> [UIDragItem] {
-        guard let item = dataSource.item(at: indexPath) else { return [] }
-
-        // Don't allow dragging pinned items
-        guard canMove(item: item) else { return [] }
-
-        isDragging = true
-        dragSourceIndex = indexPath.item
-        dropDestinationIndex = indexPath.item
-
-        print("[DragDrop] beginDrag at index \(indexPath.item)")
-        // Begin drag in Kotlin model - check return value to ensure state was updated
-        guard viewModel.items.beginDrag(index: Int32(indexPath.item)) else {
-            print("[DragDrop] beginDrag failed, aborting drag")
-            isDragging = false
-            dragSourceIndex = nil
-            dropDestinationIndex = nil
-            return []
-        }
-
-        let itemProvider = NSItemProvider(object: item.id as NSString)
-        let dragItem = UIDragItem(itemProvider: itemProvider)
-        dragItem.localObject = item
-        return [dragItem]
-    }
-
-    func collectionView(_ collectionView: UICollectionView, dragSessionDidEnd session: UIDragSession) {
-        // Commit will be called by drop delegate
-    }
-}
-
-// MARK: - UICollectionViewDropDelegate
-
-extension DragDropViewController: UICollectionViewDropDelegate {
-    func collectionView(_ collectionView: UICollectionView, dropSessionDidUpdate session: UIDropSession, withDestinationIndexPath destinationIndexPath: IndexPath?) -> UICollectionViewDropProposal {
-        guard collectionView.hasActiveDrag else {
-            return UICollectionViewDropProposal(operation: .forbidden)
-        }
-
-        if let destPath = destinationIndexPath {
-            if destPath.item != dropDestinationIndex {
-                print("[DragDrop] dropSessionDidUpdate: destination changed to \(destPath.item)")
-            }
-            dropDestinationIndex = destPath.item
-        }
-
-        return UICollectionViewDropProposal(operation: .move, intent: .insertAtDestinationIndexPath)
-    }
-
-    func collectionView(_ collectionView: UICollectionView, performDropWith coordinator: UICollectionViewDropCoordinator) {
-        print("[DragDrop] performDropWith called, dragSourceIndex=\(String(describing: dragSourceIndex))")
-        guard let sourceIndex = dragSourceIndex else {
-            print("[DragDrop] No dragSourceIndex, cancelling")
-            viewModel.items.cancelDrag()
-            isDragging = false
-            dragSourceIndex = nil
-            dropDestinationIndex = nil
-            return
-        }
-
-        // Get destination from coordinator, fall back to tracked value
-        let destIndex: Int
-        if let destPath = coordinator.destinationIndexPath {
-            destIndex = destPath.item
-            print("[DragDrop] Using coordinator destination: \(destIndex)")
-        } else if let tracked = dropDestinationIndex {
-            destIndex = tracked
-            print("[DragDrop] Using tracked destination: \(destIndex)")
-        } else {
-            // No valid destination, cancel
-            print("[DragDrop] No valid destination, cancelling")
-            viewModel.items.cancelDrag()
-            isDragging = false
-            dragSourceIndex = nil
-            dropDestinationIndex = nil
-            return
-        }
-
-        print("[DragDrop] Committing move from \(sourceIndex) to \(destIndex)")
-
-        isDragging = false
-        dragSourceIndex = nil
-        dropDestinationIndex = nil
-
-        // Use commitDrag(toIndex:) which skips the preview emission
-        // UICollectionView handles the visual animation, we just need to persist
-        Task {
-            do {
-                print("[DragDrop] Calling commitDrag(toIndex: \(destIndex))")
-                let result = try await viewModel.items.commitDrag(toIndex: Int32(destIndex))
-                print("[DragDrop] commitDrag() returned: \(result)")
-            } catch {
-                print("[DragDrop] commitDrag() failed: \(error)")
-            }
-        }
-    }
-
-    func collectionView(_ collectionView: UICollectionView, dropSessionDidEnd session: UIDropSession) {
-        if isDragging {
-            viewModel.items.cancelDrag()
-            isDragging = false
-            dragSourceIndex = nil
-            dropDestinationIndex = nil
-        }
     }
 }
 
@@ -247,10 +129,5 @@ private class DragDropCell: UICollectionViewListCell {
         subtitleLabel.text = canMove ? "Long press to drag" : "Cannot be moved"
         handleImageView.isHidden = !canMove
         contentView.backgroundColor = canMove ? .clear : UIColor.systemRed.withAlphaComponent(0.1)
-    }
-
-    func setDragging(_ isDragging: Bool) {
-        alpha = isDragging ? 0.7 : 1.0
-        transform = isDragging ? CGAffineTransform(scaleX: 1.05, y: 1.05) : .identity
     }
 }

@@ -35,21 +35,29 @@ internal class FilteredList<T>(
     private val source: SoftList<T>,
     private val filteredIndices: List<Int>,
     private val sourceLoadedCount: Int,
-    private val onUnloadedAccess: ((Int) -> Unit)? = null
+    private val leadingUnloaded: Int = 0,
+    private val onUnloadedAccess: ((Int) -> Unit)? = null,
+    private val onLeadingAccess: (() -> Unit)? = null
 ) : AbstractSoftList<T>() {
 
-    /** True when the source still has unloaded pages (so the filtered list isn't final). */
-    private val sourceNotExhausted: Boolean
-        get() = source.size > sourceLoadedCount
+    // Unloaded source items that are NOT part of the leading run — i.e. pages below the loaded
+    // window. The leading run (prepend pagination) is accounted for separately so it never gets
+    // mistaken for a trailing "load more" placeholder.
+    private val trailingUnloaded: Int
+        get() = (source.size - sourceLoadedCount - leadingUnloaded).coerceAtLeast(0)
 
-    // Estimate total filtered size based on current filter ratio.
-    private val estimatedFilteredSize: Int
+    /** True when the source still has unloaded pages *after* the loaded window. */
+    private val sourceHasTrailingUnloaded: Boolean
+        get() = trailingUnloaded > 0
+
+    // Estimate the filtered size of the loaded + trailing region (excludes the leading placeholder).
+    private val estimatedTrailingInclusiveSize: Int
         get() {
-            if (!sourceNotExhausted) {
-                // Source fully loaded: the filtered size is exact.
+            if (!sourceHasTrailingUnloaded) {
+                // No more trailing pages: the filtered size of this region is exact.
                 return filteredIndices.size
             }
-            // Source has more pages. Always keep at least one placeholder beyond the known
+            // Trailing pages remain. Always keep at least one placeholder beyond the known
             // matches so that a page matching few (or zero) items still renders a NotLoaded
             // row whose access cascades the next fetch. Without this, a first page that
             // matches nothing collapses size to 0 and pagination stalls forever even though
@@ -60,34 +68,57 @@ internal class FilteredList<T>(
                 return minWithPlaceholder
             }
             val filterRatio = filteredIndices.size.toDouble() / sourceLoadedCount
-            val extrapolated = (source.size * filterRatio).toInt()
+            // Extrapolate over the non-leading region only.
+            val effectiveSourceSize = sourceLoadedCount + trailingUnloaded
+            val extrapolated = (effectiveSourceSize * filterRatio).toInt()
             return maxOf(minWithPlaceholder, extrapolated)
         }
 
-    override val size: Int
-        get() = maxOf(filteredIndices.size, estimatedFilteredSize)
-
-    override fun softGet(index: Int): SoftValue<T>? {
-        if (index < 0) return null
-
-        if (index < filteredIndices.size) {
-            // Within loaded filtered items
-            return source.softGet(filteredIndices[index])
+    // Ratio-estimate the filtered count of the leading (prepend) region, symmetric to the trailing
+    // estimate, so the filtered size stays stable as before-fetches convert leading placeholders to
+    // present items. At least one slot remains while leading pages exist, so request() can drive the
+    // before-fetch.
+    private val leading: Int
+        get() {
+            if (leadingUnloaded <= 0) return 0
+            // No ratio yet (e.g. before the first page loads): pass the raw count through so the
+            // initial load shows a full column of skeleton rows, not a single placeholder.
+            if (sourceLoadedCount == 0) return leadingUnloaded
+            val filterRatio = filteredIndices.size.toDouble() / sourceLoadedCount
+            return maxOf(1, (leadingUnloaded * filterRatio).toInt())
         }
 
-        // Beyond loaded but within estimated size: a placeholder whose request() records
-        // the pending access and cascades a fetch on the source. (Pure peek otherwise.)
-        if (index < size) {
-            val onAccess = onUnloadedAccess
-            val sourceSoftValue = source.softGet(sourceLoadedCount)
+    override val size: Int
+        get() = leading + maxOf(filteredIndices.size, estimatedTrailingInclusiveSize)
+
+    override fun softGet(index: Int): SoftValue<T>? {
+        if (index < 0 || index >= size) return null
+
+        if (index < leading) {
+            // Leading "load earlier" placeholder: cascade to the source's leading placeholder.
+            val onLead = onLeadingAccess
+            val leadingSource = source.softGet(0)
             return SoftValue.NotLoaded {
-                onAccess?.invoke(index)
-                (sourceSoftValue as? SoftValue.NotLoaded)?.request()
+                onLead?.invoke()
+                (leadingSource as? SoftValue.NotLoaded)?.request()
             }
         }
 
-        // Out of bounds
-        return null
+        val rel = index - leading
+        if (rel < filteredIndices.size) {
+            // Within loaded filtered items
+            return source.softGet(filteredIndices[rel])
+        }
+
+        // Beyond loaded but within estimated size: a trailing placeholder whose request() records
+        // the pending access and cascades a fetch on the source. (Pure peek otherwise.)
+        val onAccess = onUnloadedAccess
+        val firstTrailingSourceIndex = leadingUnloaded + sourceLoadedCount
+        val sourceSoftValue = source.softGet(firstTrailingSourceIndex)
+        return SoftValue.NotLoaded {
+            onAccess?.invoke(index)
+            (sourceSoftValue as? SoftValue.NotLoaded)?.request()
+        }
     }
 }
 
@@ -191,6 +222,7 @@ fun <T> DeltaList<T>.filterItems(predicate: (T) -> Boolean): DeltaList<T> = flow
     var previousFilteredIndices: Set<Int> = emptySet()
     var previousFilteredSize: Int = 0
     var previousSourceItems: SoftList<T> = emptyList<T>().asSoftList()
+    var previousLeadingUnloaded = 0
 
     collect { delta ->
         val sourceItems = delta.items
@@ -198,14 +230,24 @@ fun <T> DeltaList<T>.filterItems(predicate: (T) -> Boolean): DeltaList<T> = flow
         // Build the set of source indices that pass the filter
         // Note: We need to check each item to know if it passes the filter,
         // but we defer accessing the actual item values until get() is called
-        val (currentFilteredIndices, sourceLoadedCount) = buildFilteredIndices(sourceItems, predicate)
+        val (currentFilteredIndices, sourceLoadedCount, leadingUnloaded) =
+            buildFilteredIndices(sourceItems, predicate)
         val filteredIndicesList = currentFilteredIndices.sorted()
 
         // Save previous loaded count for placeholder adjustment
         val prevLoadedCount = previousFilteredIndices.size
 
+        // A leading "load earlier" placeholder (prepend pagination) isn't modeled by the granular
+        // mutation translation below, which assumes loaded-at-start / trailing placeholders. When
+        // a leading placeholder is present now or was last tick, fall back to a Reload — always
+        // correct, just less granular. With no leading placeholder this path is never taken, so
+        // existing trailing-pagination behavior is unchanged.
+        val leadingInvolved = leadingUnloaded > 0 || previousLeadingUnloaded > 0
+
         // If previousSourceItems is empty, we can't translate mutations - treat as Reload
-        val change = if (previousSourceItems.size == 0 && delta.change !is Change.Reload) {
+        val change = if (leadingInvolved) {
+            Change.Reload
+        } else if (previousSourceItems.size == 0 && delta.change !is Change.Reload) {
             Change.Reload
         } else {
             when (delta.change) {
@@ -220,7 +262,7 @@ fun <T> DeltaList<T>.filterItems(predicate: (T) -> Boolean): DeltaList<T> = flow
                         predicate = predicate
                     )
                     // Create filtered list to get new estimated size
-                    val newFilteredList = FilteredList(sourceItems, filteredIndicesList, sourceLoadedCount)
+                    val newFilteredList = FilteredList(sourceItems, filteredIndicesList, sourceLoadedCount, leadingUnloaded)
                     val newLoadedCount = currentFilteredIndices.size
                     val newEstimatedSize = newFilteredList.size
 
@@ -236,6 +278,7 @@ fun <T> DeltaList<T>.filterItems(predicate: (T) -> Boolean): DeltaList<T> = flow
                         previousSourceItems = sourceItems
                         previousFilteredIndices = currentFilteredIndices
                         previousFilteredSize = newEstimatedSize
+                        previousLeadingUnloaded = leadingUnloaded
                         return@collect
                     }
                     Change.Mutations(mutations)
@@ -245,9 +288,10 @@ fun <T> DeltaList<T>.filterItems(predicate: (T) -> Boolean): DeltaList<T> = flow
 
         previousSourceItems = sourceItems
         previousFilteredIndices = currentFilteredIndices
+        previousLeadingUnloaded = leadingUnloaded
 
         // Use lazy filtered list - items are only accessed when get() is called
-        val filteredList = FilteredList(sourceItems, filteredIndicesList, sourceLoadedCount)
+        val filteredList = FilteredList(sourceItems, filteredIndicesList, sourceLoadedCount, leadingUnloaded)
         previousFilteredSize = filteredList.size
         emit(Delta(filteredList, change))
     }
@@ -285,6 +329,7 @@ fun <T> DeltaList<T>.filterItemsDynamic(
     var currentSourceLoadedCount: Int = 0
     var previousFilteredIndices: Set<Int> = emptySet()
     var previousFilteredSize: Int = 0 // Track estimated size for placeholder handling
+    var previousLeadingUnloaded = 0 // Track the leading placeholder run for the Reload fallback
     var currentPredicate: ((T) -> Boolean)? = null
     var pendingDelta: Delta<T>? = null // Store delta if it arrives before predicate
 
@@ -316,13 +361,13 @@ fun <T> DeltaList<T>.filterItemsDynamic(
     }
 
     // Helper to create FilteredList with access tracking
-    fun createFilteredList(source: SoftList<T>, indices: List<Int>, loadedCount: Int): FilteredList<T> {
-        return FilteredList(source, indices, loadedCount, onUnloadedAccess)
+    fun createFilteredList(source: SoftList<T>, indices: List<Int>, loadedCount: Int, leadingUnloaded: Int): FilteredList<T> {
+        return FilteredList(source, indices, loadedCount, leadingUnloaded, onUnloadedAccess)
     }
 
     // Cascade fetches: after emitting a delta, check if pending accesses are still
     // NotLoaded and trigger another fetch if needed
-    fun cascadeFetchesIfNeeded(filteredList: FilteredList<T>, source: SoftList<T>, sourceLoadedCount: Int) {
+    fun cascadeFetchesIfNeeded(filteredList: FilteredList<T>, source: SoftList<T>, sourceLoadedCount: Int, leadingUnloaded: Int) {
         // Find indices that are still not loaded
         val stillPending = pendingAccessIndices.load().filter { index ->
             index < filteredList.size && filteredList.softGet(index) is SoftValue.NotLoaded
@@ -332,9 +377,10 @@ fun <T> DeltaList<T>.filterItemsDynamic(
         setPendingAccess(stillPending.toSet())
 
         // If there are still pending accesses and the source has more data, request the next
-        // unloaded source item (its placeholder's request() drives the fetch).
-        if (stillPending.isNotEmpty() && sourceLoadedCount < source.size) {
-            (source.softGet(sourceLoadedCount) as? SoftValue.NotLoaded)?.request()
+        // unloaded source item *after* the leading run (its placeholder's request() drives the fetch).
+        val firstTrailingSourceIndex = leadingUnloaded + sourceLoadedCount
+        if (stillPending.isNotEmpty() && firstTrailingSourceIndex < source.size) {
+            (source.softGet(firstTrailingSourceIndex) as? SoftValue.NotLoaded)?.request()
         }
     }
 
@@ -361,28 +407,32 @@ fun <T> DeltaList<T>.filterItemsDynamic(
                     val sourceItems = deltaToProcess.items
                     currentSourceItems = sourceItems
 
-                    val (filteredIndices, loadedCount) = buildFilteredIndices(sourceItems, event.predicate)
+                    val (filteredIndices, loadedCount, leadingUnloaded) =
+                        buildFilteredIndices(sourceItems, event.predicate)
                     val filteredIndicesList = filteredIndices.sorted()
 
                     previousFilteredIndices = filteredIndices
                     currentSourceLoadedCount = loadedCount
+                    previousLeadingUnloaded = leadingUnloaded
 
-                    val filteredList = createFilteredList(sourceItems, filteredIndicesList, loadedCount)
+                    val filteredList = createFilteredList(sourceItems, filteredIndicesList, loadedCount, leadingUnloaded)
                     previousFilteredSize = filteredList.size
                     emit(Delta(filteredList, Change.Reload))
-                    cascadeFetchesIfNeeded(filteredList, sourceItems, loadedCount)
+                    cascadeFetchesIfNeeded(filteredList, sourceItems, loadedCount, leadingUnloaded)
                 } else if (currentSourceItems.size > 0) {
                     // Predicate changed - re-filter current items and emit Reload
-                    val (filteredIndices, loadedCount) = buildFilteredIndices(currentSourceItems, event.predicate)
+                    val (filteredIndices, loadedCount, leadingUnloaded) =
+                        buildFilteredIndices(currentSourceItems, event.predicate)
                     val filteredIndicesList = filteredIndices.sorted()
 
                     previousFilteredIndices = filteredIndices
                     currentSourceLoadedCount = loadedCount
+                    previousLeadingUnloaded = leadingUnloaded
 
-                    val filteredList = createFilteredList(currentSourceItems, filteredIndicesList, loadedCount)
+                    val filteredList = createFilteredList(currentSourceItems, filteredIndicesList, loadedCount, leadingUnloaded)
                     previousFilteredSize = filteredList.size
                     emit(Delta(filteredList, Change.Reload))
-                    cascadeFetchesIfNeeded(filteredList, currentSourceItems, loadedCount)
+                    cascadeFetchesIfNeeded(filteredList, currentSourceItems, loadedCount, leadingUnloaded)
                 }
             }
 
@@ -402,12 +452,22 @@ fun <T> DeltaList<T>.filterItemsDynamic(
                 // Save previous loaded count for placeholder adjustment
                 val prevLoadedCount = previousFilteredIndices.size
 
-                val (currentFilteredIndices, loadedCount) = buildFilteredIndices(sourceItems, predicate)
+                val (currentFilteredIndices, loadedCount, leadingUnloaded) =
+                    buildFilteredIndices(sourceItems, predicate)
                 val filteredIndicesList = currentFilteredIndices.sorted()
                 currentSourceLoadedCount = loadedCount
 
+                // A leading "load earlier" placeholder (prepend pagination) isn't modeled by the
+                // granular mutation translation, which assumes loaded-at-start / trailing
+                // placeholders. Fall back to Reload when a leading placeholder is involved now or
+                // last tick — always correct, just less granular. With no leading placeholder this
+                // path is never taken, so existing trailing-pagination behavior is unchanged.
+                val leadingInvolved = leadingUnloaded > 0 || previousLeadingUnloaded > 0
+
                 // If previousFilteredIndices is empty, we can't translate mutations - treat as Reload
-                val change = if (previousFilteredIndices.isEmpty() && delta.change !is Change.Reload) {
+                val change = if (leadingInvolved) {
+                    Change.Reload
+                } else if (previousFilteredIndices.isEmpty() && delta.change !is Change.Reload) {
                     Change.Reload
                 } else {
                     when (delta.change) {
@@ -422,7 +482,7 @@ fun <T> DeltaList<T>.filterItemsDynamic(
                                 predicate = predicate
                             )
                             // Create filtered list to get new estimated size
-                            val newFilteredList = createFilteredList(sourceItems, filteredIndicesList, loadedCount)
+                            val newFilteredList = createFilteredList(sourceItems, filteredIndicesList, loadedCount, leadingUnloaded)
                             val newLoadedCount = currentFilteredIndices.size
                             val newEstimatedSize = newFilteredList.size
 
@@ -437,8 +497,9 @@ fun <T> DeltaList<T>.filterItemsDynamic(
                             if (mutations.isEmpty()) {
                                 previousFilteredIndices = currentFilteredIndices
                                 previousFilteredSize = newEstimatedSize
+                                previousLeadingUnloaded = leadingUnloaded
                                 // Still cascade fetches even if no mutations to emit
-                                cascadeFetchesIfNeeded(newFilteredList, sourceItems, loadedCount)
+                                cascadeFetchesIfNeeded(newFilteredList, sourceItems, loadedCount, leadingUnloaded)
                                 return@collect
                             }
                             Change.Mutations(mutations)
@@ -447,11 +508,12 @@ fun <T> DeltaList<T>.filterItemsDynamic(
                 }
 
                 previousFilteredIndices = currentFilteredIndices
+                previousLeadingUnloaded = leadingUnloaded
 
-                val filteredList = createFilteredList(sourceItems, filteredIndicesList, loadedCount)
+                val filteredList = createFilteredList(sourceItems, filteredIndicesList, loadedCount, leadingUnloaded)
                 previousFilteredSize = filteredList.size
                 emit(Delta(filteredList, change))
-                cascadeFetchesIfNeeded(filteredList, sourceItems, loadedCount)
+                cascadeFetchesIfNeeded(filteredList, sourceItems, loadedCount, leadingUnloaded)
             }
         }
     }
@@ -464,7 +526,8 @@ fun <T> DeltaList<T>.filterItemsDynamic(
  */
 private data class FilteredIndicesResult(
     val filteredIndices: Set<Int>,
-    val loadedCount: Int
+    val loadedCount: Int,
+    val leadingUnloaded: Int = 0
 )
 
 /**
@@ -477,18 +540,26 @@ private data class FilteredIndicesResult(
 private fun <T> buildFilteredIndices(source: SoftList<T>, predicate: (T) -> Boolean): FilteredIndicesResult {
     val result = mutableSetOf<Int>()
     var loadedCount = 0
+    var leadingUnloaded = 0
+    var sawPresent = false
 
     // Use soft access to avoid triggering pagination fetches.
     for (i in 0 until source.size) {
         when (val soft = source.softGet(i)) {
             is SoftValue.Present -> {
+                sawPresent = true
                 loadedCount++
                 if (predicate(soft.value)) {
                     result.add(i)
                 }
             }
             is SoftValue.NotLoaded -> {
-                // Skip unloaded items - they'll be included when loaded
+                // Skip unloaded items - they'll be included when loaded. Count the run of
+                // NotLoaded before the first loaded item so the filtered list can surface a
+                // matching leading "load earlier" placeholder (prepend pagination).
+                if (!sawPresent) {
+                    leadingUnloaded++
+                }
             }
             null -> {
                 // Out of bounds, skip
@@ -496,7 +567,7 @@ private fun <T> buildFilteredIndices(source: SoftList<T>, predicate: (T) -> Bool
         }
     }
 
-    return FilteredIndicesResult(result, loadedCount)
+    return FilteredIndicesResult(result, loadedCount, leadingUnloaded)
 }
 
 /**

@@ -83,6 +83,15 @@ fun MainScreen() {
         }
 
         Button(
+            onClick = { context.startActivity(Intent(context, BottomPaginatedListActivity::class.java)) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp)
+        ) {
+            Text("Bottom Paginated Demo")
+        }
+
+        Button(
             onClick = { context.startActivity(Intent(context, SectionedListActivity::class.java)) },
             modifier = Modifier
                 .fillMaxWidth()

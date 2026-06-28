@@ -63,6 +63,50 @@ class PaginatedOracleTest {
     }
 
     @Test
+    fun bottomAnchoredWithEstimateIsSoftOracleConsistent() = runTest {
+        // Load the LAST page first with an estimate, so the leading region inflates to per-item
+        // placeholders. Scrolling up (requesting the leading placeholder) must convert them to
+        // present items in place, each emission reconstructing the previous via the soft oracle.
+        val pages = mapOf<Int, Page<Item, Int>>(
+            0 to Page(listOf(Item(0), Item(1)), beforeToken = null, afterToken = null, estimatedTotalSize = 10),
+            1 to Page(listOf(Item(2), Item(3)), beforeToken = 0, afterToken = null, estimatedTotalSize = 10),
+            2 to Page(listOf(Item(4), Item(5)), beforeToken = 1, afterToken = null, estimatedTotalSize = 10),
+            3 to Page(listOf(Item(6), Item(7)), beforeToken = 2, afterToken = null, estimatedTotalSize = 10),
+            4 to Page(listOf(Item(8), Item(9)), beforeToken = 3, afterToken = null, estimatedTotalSize = 10)
+        )
+
+        val flow = paginatedDeltaList<Item, Int>(
+            scope = this,
+            startToken = 4,
+            fetchWindowSize = 1,
+            fetch = { _: LoadDirection, token: Int -> pages[token] ?: throw AssertionError("unexpected token $token") }
+        )
+
+        val results = mutableListOf<Delta<Item>>()
+        val job = launch { flow.collect { results.add(it) } }
+        delay(100)
+
+        // The initial display is 10 rows (8 leading placeholders + the last page 8,9).
+        assertTrue(results.last().items.size == 10)
+        assertTrue(results.last().items.softGet(0) is SoftValue.NotLoaded)
+        assertTrue(results.last().items.softGet(9) is SoftValue.Present)
+
+        // Request the leading placeholder repeatedly to page upward to the top.
+        repeat(6) {
+            val items = results.last().items
+            (items.softGet(0) as? SoftValue.NotLoaded)?.request()
+            delay(50)
+        }
+        job.cancel()
+
+        results.assertSoftOracle()
+
+        val finalItems = results.last().items
+        assertTrue((0 until finalItems.size).all { finalItems.softGet(it) is SoftValue.Present })
+        assertTrue(finalItems.size == 10)
+    }
+
+    @Test
     fun appendOnlyPaginationIsSoftOracleConsistent() = runTest {
         val pages = mapOf<Int, Page<Item, Int>>(
             0 to Page(listOf(Item(0), Item(1)), beforeToken = null, afterToken = 1),

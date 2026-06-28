@@ -28,6 +28,10 @@
             android:exported="false"
             android:theme="@style/Theme.DeltaListDemo" />
         <activity
+            android:name=".BottomPaginatedListActivity"
+            android:exported="false"
+            android:theme="@style/Theme.DeltaListDemo" />
+        <activity
             android:name=".SectionedListActivity"
             android:exported="false"
             android:theme="@style/Theme.DeltaListDemo" />

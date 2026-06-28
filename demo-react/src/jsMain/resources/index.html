@@ -33,8 +33,10 @@
         .loading-badge { background: #ff9800; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
         .filter-bar { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 13px; }
         .filter-checkbox { display: flex; align-items: center; gap: 4px; cursor: pointer; }
-        .placeholder { opacity: 0.5; background: #f9f9f9; }
-        .placeholder-text { color: #aaa; font-style: italic; }
+        .skeleton-row { cursor: default; }
+        .skeleton-bar { display: inline-block; height: 18px; width: 40%; border-radius: 6px; background: linear-gradient(90deg, #eee 25%, #e0e0e0 37%, #eee 63%); background-size: 400% 100%; animation: skeleton-shimmer 1.4s ease infinite; }
+        @keyframes skeleton-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+        .added-title { color: #6200ee; font-style: italic; }
         .drag-status { font-weight: 500; }
         .drag-status.dragging { background: #fff3e0; }
         .drag-status.committing { background: #e8f5e9; }

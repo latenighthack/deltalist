@@ -111,17 +111,16 @@ function SectionedListDemo({ vm }) {
 
 // --- Paginated List Demo ---
 
-// A not-yet-loaded row. Triggers the fetch on appear (mirrors iOS .onAppear /
-// Android's soft.request() in the row body). Because the list is virtualized, only
-// rows scrolled into view mount, so only visible placeholders drive pagination.
-function PaginatedLoadingRow({ index, request }) {
+// A not-yet-loaded row rendered as a skeleton item (no spinner, no text). Triggers the fetch on
+// mount (mirrors iOS .onAppear / Android's soft.request() in the row body). Because the list is
+// virtualized, only rows scrolled into view mount, so only visible placeholders drive pagination.
+function SkeletonRow({ request }) {
     useEffect(() => {
         if (request) request();
     }, [request]);
     return (
-        <div className="item-card placeholder">
-            <span className="item-title placeholder-text">Loading...</span>
-            <span className="item-id">index: {index}</span>
+        <div className="item-card skeleton-row">
+            <span className="skeleton-bar" />
         </div>
     );
 }
@@ -159,7 +158,7 @@ function PaginatedListDemo({ vm }) {
                                 <span className="item-id">index: {index}</span>
                             </div>
                         ) : (
-                            <PaginatedLoadingRow index={index} request={cell.request} />
+                            <SkeletonRow request={cell.request} />
                         )}
                     </div>
                 )}
@@ -177,6 +176,111 @@ function PaginatedListDemo({ vm }) {
             </div>
             <div className="status-bar">
                 <span>Loaded: {loadedCount} | Filtered: {list.loadedCount} | Total: {list.size}</span>
+            </div>
+            <div className="paginated-virtual-list">
+                <AutoSizer>
+                    {({ width, height }) => (
+                        <List
+                            ref={listRef}
+                            width={width}
+                            height={height}
+                            rowCount={list.size}
+                            deferredMeasurementCache={cache}
+                            rowHeight={cache.rowHeight}
+                            rowRenderer={rowRenderer}
+                            overscanRowCount={5}
+                        />
+                    )}
+                </AutoSizer>
+            </div>
+            <div className="filter-bar">
+                <span>Exclude divisors of:</span>
+                {divisors.map(d => (
+                    <label key={d} className="filter-checkbox">
+                        <input
+                            type="checkbox"
+                            checked={excludeDivisors && excludeDivisors.includes(d)}
+                            onChange={() => vm.toggleDivisorFilter(d)}
+                        />
+                        {d}
+                    </label>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+// --- Bottom Paginated List Demo ---
+
+// Chat-style pagination: starts scrolled to the bottom, only the bottom items load first, and
+// scrolling up loads older pages. Buttons add an item at index 0 (top) and at index n (bottom).
+function BottomPaginatedListDemo({ vm }) {
+    const list = useSoftDeltaList(vm.messages);
+    const loadingDirection = useFlow(vm.loadingDirection, null);
+    const loadedCount = useFlow(vm.loadedCount, 0);
+    const excludeDivisors = useFlow(vm.excludeDivisors, []);
+    const listRef = useRef(null);
+    const didInitialScrollRef = useRef(false);
+    const pendingBottomRef = useRef(false);
+
+    const cacheRef = useRef(null);
+    if (cacheRef.current === null) {
+        cacheRef.current = new CellMeasurerCache({ fixedWidth: true, defaultHeight: 52 });
+    }
+    const cache = cacheRef.current;
+
+    useEffect(() => {
+        if (!listRef.current) return;
+        listRef.current.forceUpdateGrid();
+        // Anchor at the bottom once the estimated size is known (skeleton rows show at the bottom
+        // and fill in there), then again whenever an item is appended at the bottom.
+        if (!didInitialScrollRef.current && list.size > 1) {
+            listRef.current.scrollToRow(list.size - 1);
+            didInitialScrollRef.current = true;
+        } else if (pendingBottomRef.current && list.size > 0) {
+            listRef.current.scrollToRow(list.size - 1);
+            pendingBottomRef.current = false;
+        }
+    }, [list]);
+
+    const rowRenderer = useCallback(({ index, key, parent, style }) => {
+        const cell = list.get(index);
+        // Manually-added items use negative values so they never collide with the paginated data.
+        const isAdded = cell.loaded && cell.value < 0;
+        return (
+            <CellMeasurer cache={cache} columnIndex={0} key={key} parent={parent} rowIndex={index}>
+                {({ registerChild }) => (
+                    <div ref={registerChild} style={{ ...style, paddingBottom: 6 }}>
+                        {cell.loaded ? (
+                            <div className="item-card">
+                                <span className={`item-title ${isAdded ? 'added-title' : ''}`}>
+                                    {isAdded ? `Added #${-cell.value}` : `#${cell.value}`}
+                                </span>
+                                <span className="item-id">index: {index}</span>
+                            </div>
+                        ) : (
+                            <SkeletonRow request={cell.request} />
+                        )}
+                    </div>
+                )}
+            </CellMeasurer>
+        );
+    }, [list, cache]);
+
+    const divisors = [2, 3, 5, 7, 11];
+
+    return (
+        <div className="demo-panel">
+            <div className="status-bar">
+                <span>Bottom Paginated (scroll up for older)</span>
+                {loadingDirection && <span className="loading-badge">Loading: {loadingDirection}</span>}
+            </div>
+            <div className="status-bar">
+                <span>Loaded: {loadedCount} | Visible rows: {list.size}</span>
+            </div>
+            <div className="button-bar">
+                <button onClick={() => vm.addAtTop()}>Add at top (0)</button>
+                <button onClick={() => { vm.addAtBottom(); pendingBottomRef.current = true; }}>Add at bottom (n)</button>
             </div>
             <div className="paginated-virtual-list">
                 <AutoSizer>
@@ -298,6 +402,7 @@ function DragDropDemo({ vm }) {
 const TABS = [
     { key: 'list', label: 'Basic List' },
     { key: 'paginated', label: 'Paginated' },
+    { key: 'bottom-paginated', label: 'Bottom Paginated' },
     { key: 'sectioned', label: 'Sectioned' },
     { key: 'dragdrop', label: 'Drag & Drop' },
 ];
@@ -323,6 +428,7 @@ export default function App({ app }) {
             <div className="tab-content">
                 {activeTab === 'list' && <BasicListDemo vm={app.listViewModel} />}
                 {activeTab === 'paginated' && <PaginatedListDemo vm={app.paginatedListViewModel} />}
+                {activeTab === 'bottom-paginated' && <BottomPaginatedListDemo vm={app.bottomPaginatedListViewModel} />}
                 {activeTab === 'sectioned' && <SectionedListDemo vm={app.sectionedListViewModel} />}
                 {activeTab === 'dragdrop' && <DragDropDemo vm={app.dragDropViewModel} />}
             </div>

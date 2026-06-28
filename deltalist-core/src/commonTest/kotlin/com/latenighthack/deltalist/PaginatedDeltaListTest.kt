@@ -461,24 +461,63 @@ class PaginatedDeltaListTest {
 
         delay(100)
 
+        // Bottom-anchored with an estimate: the leading region is inflated to per-item
+        // placeholders (100 total = 97 leading + 3 loaded), mirroring the trailing side.
+        assertEquals(100, results.last().items.size)
+        assertTrue(results.last().items.softGet(0) is SoftValue.NotLoaded)
+        assertEquals(Item(7, "G"), (results.last().items.softGet(99) as SoftValue.Present).value)
+
         // Request the leading placeholder to trigger the before fetch.
         (results.last().items.softGet(0) as? SoftValue.NotLoaded)?.request()
         delay(100)
 
         job.cancel()
 
-        // The before page exhausts earlier history (beforeToken null), so the leading
-        // placeholder is filled by the first prepended item (Update at 0) and the rest are
-        // inserted after it.
+        // The before page exhausts earlier history (beforeToken null). The 2 prepended items fill
+        // the first 2 leading placeholders (Update) and the remaining 95 phantom placeholders the
+        // over-large estimate created are removed.
         val lastChange = results.last().change as Change.Mutations
         assertEquals(2, lastChange.operations.size)
-        assertEquals(Mutation.Update(0, 1), lastChange.operations[0])
-        assertEquals(Mutation.Insert(1, 1), lastChange.operations[1])
+        assertEquals(Mutation.Update(0, 2), lastChange.operations[0])
+        assertEquals(Mutation.Remove(2, 95), lastChange.operations[1])
         // Final order is correct, no leading placeholder remains.
+        assertEquals(5, results.last().items.size)
         assertEquals(
             listOf(Item(3, "C"), Item(4, "D"), Item(5, "E"), Item(6, "F"), Item(7, "G")),
             results.last().items.toList()
         )
+    }
+
+    @Test
+    fun initialEstimatedSizeShowsSkeletonRowsBeforeFirstLoad() = runTest {
+        val flow = paginatedDeltaList<Item, Int>(
+            scope = this,
+            startToken = 9,
+            initialEstimatedSize = 100,
+            fetch = { _, _ ->
+                delay(1000) // keep the first page pending so we observe the pre-load snapshot
+                Page(
+                    items = (90..99).map { Item(it, "Item$it") },
+                    beforeToken = 8,
+                    afterToken = null,
+                    estimatedTotalSize = 100
+                )
+            }
+        )
+
+        val results = mutableListOf<Delta<Item>>()
+        val job = launch { flow.collect { results.add(it) } }
+
+        // Collection starts the (still-pending) initial fetch.
+        delay(100)
+
+        // Before the first page resolves, the snapshot reports the estimated size as a full column
+        // of skeleton rows — not a single "loading" placeholder.
+        val preload = results.last()
+        assertEquals(100, preload.items.size)
+        assertTrue((0 until preload.items.size).all { preload.items.softGet(it) is SoftValue.NotLoaded })
+
+        job.cancel()
     }
 
     // ========== Concurrent Access Tests ==========

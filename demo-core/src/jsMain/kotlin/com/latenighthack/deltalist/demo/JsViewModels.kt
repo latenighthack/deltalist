@@ -166,6 +166,24 @@ class JsPaginatedListViewModel {
 
 @OptIn(ExperimentalJsExport::class)
 @JsExport
+class JsBottomPaginatedListViewModel {
+    private val vm = BottomPaginatedListViewModel()
+
+    // Bottom-anchored ("chat-style") paginated soft list. useSoftDeltaList exposes the full soft
+    // list (per-item placeholders included), so the React rows drive the BEFORE fetch via each
+    // placeholder's request() as the user scrolls up, mirroring iOS/Android.
+    val messages: Any = vm.messages
+    val loadingDirection: Any = vm.loadingDirection.map { it?.name?.lowercase() }
+    val loadedCount: Any = vm.loadedCount
+    val excludeDivisors: Any = vm.excludeDivisors.map { it.toTypedArray() }
+
+    fun addAtTop() = vm.addAtTop()
+    fun addAtBottom() = vm.addAtBottom()
+    fun toggleDivisorFilter(divisor: Int) = vm.toggleDivisorFilter(divisor)
+}
+
+@OptIn(ExperimentalJsExport::class)
+@JsExport
 class JsDragDropViewModel {
     private val vm = DragDropViewModel()
     private val scope = CoroutineScope(SupervisorJob())
@@ -192,5 +210,6 @@ class JsDemoApp {
     val listViewModel = JsListViewModel()
     val sectionedListViewModel = JsSectionedListViewModel()
     val paginatedListViewModel = JsPaginatedListViewModel()
+    val bottomPaginatedListViewModel = JsBottomPaginatedListViewModel()
     val dragDropViewModel = JsDragDropViewModel()
 }

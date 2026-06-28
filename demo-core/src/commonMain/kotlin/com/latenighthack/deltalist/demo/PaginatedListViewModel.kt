@@ -24,7 +24,8 @@ class PaginatedListViewModel {
     private val basePaginatedNumbers: DeltaList<Int> = paginatedDeltaList(
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
         fetchWindowSize = 2,
-        startToken = 0
+        startToken = 0,
+        initialEstimatedSize = 2_000
     ) { direction, pageToken ->
         _paginatedLoadingDirection.value = direction
 
