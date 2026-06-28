@@ -397,6 +397,40 @@ function DragDropDemo({ vm }) {
     );
 }
 
+// --- Sorted List Demo ---
+
+// An unordered set of profiles projected into a 4-column grid sorted alphabetically by full name.
+// "Add" inserts a random unused profile (it lands in its sorted slot); tapping a profile removes it.
+function SortedListDemo({ vm }) {
+    const profiles = useDeltaList(vm.profiles);
+
+    return (
+        <div className="demo-panel">
+            <div className="status-bar">
+                <span>Unordered set, sorted by full name</span>
+                <span>{profiles.length} profiles</span>
+            </div>
+            <div className="profile-grid">
+                {profiles.map((profile) => profile ? (
+                    <div
+                        key={profile.id}
+                        className="profile-cell"
+                        onClick={() => vm.remove(profile.id)}
+                        title="Tap to remove"
+                    >
+                        <span className="profile-first">{profile.firstName}</span>
+                        <span className="profile-last">{profile.lastName}</span>
+                    </div>
+                ) : null)}
+            </div>
+            <div className="button-bar">
+                <button onClick={() => vm.addRandom()}>Add</button>
+            </div>
+            {profiles.length === 0 && <div className="empty-state">No profiles. Click "Add" to get started.</div>}
+        </div>
+    );
+}
+
 // --- Main App with Tabs ---
 
 const TABS = [
@@ -405,6 +439,7 @@ const TABS = [
     { key: 'bottom-paginated', label: 'Bottom Paginated' },
     { key: 'sectioned', label: 'Sectioned' },
     { key: 'dragdrop', label: 'Drag & Drop' },
+    { key: 'sorted', label: 'Sorted List' },
 ];
 
 export default function App({ app }) {
@@ -431,6 +466,7 @@ export default function App({ app }) {
                 {activeTab === 'bottom-paginated' && <BottomPaginatedListDemo vm={app.bottomPaginatedListViewModel} />}
                 {activeTab === 'sectioned' && <SectionedListDemo vm={app.sectionedListViewModel} />}
                 {activeTab === 'dragdrop' && <DragDropDemo vm={app.dragDropViewModel} />}
+                {activeTab === 'sorted' && <SortedListDemo vm={app.sortedListViewModel} />}
             </div>
         </div>
     );

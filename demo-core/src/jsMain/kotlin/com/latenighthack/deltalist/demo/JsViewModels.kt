@@ -21,6 +21,15 @@ private fun Item.toJs(): dynamic {
     return obj
 }
 
+private fun Profile.toJs(): dynamic {
+    val obj = js("({})")
+    obj.id = id
+    obj.firstName = firstName
+    obj.lastName = lastName
+    obj.fullName = fullName
+    return obj
+}
+
 private fun SectionRow.toJs(): dynamic {
     val obj = js("({})")
     when (this) {
@@ -206,10 +215,22 @@ class JsDragDropViewModel {
 
 @OptIn(ExperimentalJsExport::class)
 @JsExport
+class JsSortedListViewModel {
+    private val vm = SortedListViewModel()
+
+    val profiles: Any = vm.profiles.mapItems { it.toJs() }
+
+    fun addRandom() = vm.addRandom()
+    fun remove(id: String) = vm.removeById(id)
+}
+
+@OptIn(ExperimentalJsExport::class)
+@JsExport
 class JsDemoApp {
     val listViewModel = JsListViewModel()
     val sectionedListViewModel = JsSectionedListViewModel()
     val paginatedListViewModel = JsPaginatedListViewModel()
     val bottomPaginatedListViewModel = JsBottomPaginatedListViewModel()
     val dragDropViewModel = JsDragDropViewModel()
+    val sortedListViewModel = JsSortedListViewModel()
 }

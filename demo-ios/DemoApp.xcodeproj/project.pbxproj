@@ -12,6 +12,8 @@
 		001A00003 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 001B00003 /* Assets.xcassets */; };
 		001A00030 /* BasicListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00030 /* BasicListView.swift */; };
 		001A00031 /* PaginatedListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00031 /* PaginatedListView.swift */; };
+		001A00036 /* SortedListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00036 /* SortedListView.swift */; };
+		001A00045 /* SortedListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00045 /* SortedListViewController.swift */; };
 		001A00035 /* BottomPaginatedListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00035 /* BottomPaginatedListView.swift */; };
 		001A00032 /* SectionedListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00032 /* SectionedListView.swift */; };
 		001A00033 /* DragDropView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00033 /* DragDropView.swift */; };
@@ -34,6 +36,8 @@
 		001B00003 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		001B00030 /* BasicListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BasicListView.swift; sourceTree = "<group>"; };
 		001B00031 /* PaginatedListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaginatedListView.swift; sourceTree = "<group>"; };
+		001B00036 /* SortedListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SortedListView.swift; sourceTree = "<group>"; };
+		001B00045 /* SortedListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SortedListViewController.swift; sourceTree = "<group>"; };
 		001B00035 /* BottomPaginatedListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomPaginatedListView.swift; sourceTree = "<group>"; };
 		001B00032 /* SectionedListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionedListView.swift; sourceTree = "<group>"; };
 		001B00033 /* DragDropView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DragDropView.swift; sourceTree = "<group>"; };
@@ -87,6 +91,7 @@
 			isa = PBXGroup;
 			children = (
 				001B00030 /* BasicListView.swift */,
+				001B00036 /* SortedListView.swift */,
 				001B00031 /* PaginatedListView.swift */,
 				001B00035 /* BottomPaginatedListView.swift */,
 				001B00032 /* SectionedListView.swift */,
@@ -100,6 +105,7 @@
 			isa = PBXGroup;
 			children = (
 				001B00040 /* BasicListViewController.swift */,
+				001B00045 /* SortedListViewController.swift */,
 				001B00041 /* PaginatedListViewController.swift */,
 				001B00044 /* BottomPaginatedListViewController.swift */,
 				001B00042 /* SectionedListViewController.swift */,
@@ -209,7 +215,9 @@
 				001A00052 /* BottomPaginatedListViewModelAdapter.swift in Sources */,
 				001A00053 /* DragDropViewModelAdapter.swift in Sources */,
 				001A00030 /* BasicListView.swift in Sources */,
+				001A00036 /* SortedListView.swift in Sources */,
 				001A00031 /* PaginatedListView.swift in Sources */,
+				001A00045 /* SortedListViewController.swift in Sources */,
 				001A00035 /* BottomPaginatedListView.swift in Sources */,
 				001A00032 /* SectionedListView.swift in Sources */,
 				001A00033 /* DragDropView.swift in Sources */,

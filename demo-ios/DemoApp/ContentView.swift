@@ -49,6 +49,13 @@ struct ContentView: View {
                         )
                     }
 
+                    NavigationLink(destination: SortedListView()) {
+                        DemoButton(
+                            title: "Sorted List Demo",
+                            description: "Unordered set sorted into a 4-column grid"
+                        )
+                    }
+
                     NavigationLink(destination: DragDropView()) {
                         DemoButton(
                             title: "Drag & Drop Demo",

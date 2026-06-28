@@ -40,8 +40,11 @@ class SortedListViewModel {
     }
 
     /** Removes a profile from the set. */
-    fun remove(profile: Profile) {
-        _profiles.value = _profiles.value - profile
+    fun remove(profile: Profile) = removeById(profile.id)
+
+    /** Removes the profile with the given id from the set. */
+    fun removeById(id: String) {
+        _profiles.value = _profiles.value.filterNot { it.id == id }.toSet()
     }
 
     private fun buildPool(): List<Profile> {
