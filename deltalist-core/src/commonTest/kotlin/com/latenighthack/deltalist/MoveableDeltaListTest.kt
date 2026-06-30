@@ -158,7 +158,7 @@ class MoveableDeltaListTest {
     }
 
     @Test
-    fun `commitDrag(toIndex) returns true without calling onMove when target is same position`() = runTest {
+    fun `commitDrag with toIndex returns true without calling onMove when target is same position`() = runTest {
         val source = mutableDeltaListOf(listOf("A", "B", "C"))
         var moveCalled = false
 
