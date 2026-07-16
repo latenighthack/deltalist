@@ -39,7 +39,11 @@ jobs:
           fi
 
       - name: Publish and release
-        run: ./gradlew publishToMavenCentral --no-configuration-cache --stacktrace
+        # -x javaDocReleaseGeneration: deltalist-core now applies com.android.library (androidTarget for
+        # basekit's Android consumers); AGP 8.7's javaDocReleaseGeneration (dokka) fails under kotlin
+        # 2.2.21. vanniktech attaches its own (empty) javadoc jar, so skipping the AGP task is safe and
+        # matches the validated local publish.
+        run: ./gradlew publishToMavenCentral --no-configuration-cache --stacktrace -x javaDocReleaseGeneration
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
