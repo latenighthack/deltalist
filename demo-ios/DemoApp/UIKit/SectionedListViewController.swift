@@ -1,14 +1,15 @@
 import UIKit
 import DemoCore
-import DeltaListCore
 
 /// UIKit implementation of the sectioned list demo.
-/// Uses SectionedDeltaCollectionDataSource from DeltaListCore - NO DiffableDataSource!
+/// Uses the DeltaRows DSL via DemoCore (not DeltaListCore directly — the SKIE-bundled Swift exists
+/// in both, so importing both is ambiguous): typed `Header` and `Row` specs replace manual
+/// registration and the cell/header provider switch.
 @MainActor
 class SectionedListViewController: UIViewController {
     private let viewModel: SectionedListViewModel
     private var collectionView: UICollectionView!
-    private var dataSource: DeltaListCore.SectionedDeltaCollectionDataSource<SectionHeader, Item>!
+    private var dataSource: SectionedDeltaCollectionDataSource<AnyObject, AnyObject>!
 
     var selectedSectionIndex: Int = -1 {
         didSet {
@@ -46,14 +47,6 @@ class SectionedListViewController: UIViewController {
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         collectionView.backgroundColor = .systemBackground
         view.addSubview(collectionView)
-
-        // Register cell and header
-        collectionView.register(SectionItemCell.self, forCellWithReuseIdentifier: "ItemCell")
-        collectionView.register(
-            SectionHeaderView.self,
-            forSupplementaryViewOfKind: UICollectionView.elementKindSectionHeader,
-            withReuseIdentifier: "Header"
-        )
     }
 
     private func createLayout() -> UICollectionViewLayout {
@@ -64,32 +57,19 @@ class SectionedListViewController: UIViewController {
     }
 
     private func setupDataSource() {
-        // Create SectionedDeltaCollectionDataSource from DeltaListCore
-        dataSource = DeltaListCore.SectionedDeltaCollectionDataSource<SectionHeader, Item>(
-            collectionView: collectionView,
-            cellProvider: { [weak self] (collectionView: UICollectionView, indexPath: IndexPath, item: Item) -> UICollectionViewCell in
-                let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "ItemCell", for: indexPath) as! SectionItemCell
-                cell.configure(with: item)
-                return cell
-            },
-            headerProvider: { [weak self] (collectionView: UICollectionView, indexPath: IndexPath, header: SectionHeader) -> UICollectionReusableView in
-                let headerView = collectionView.dequeueReusableSupplementaryView(
-                    ofKind: UICollectionView.elementKindSectionHeader,
-                    withReuseIdentifier: "Header",
-                    for: indexPath
-                ) as! SectionHeaderView
-
-                let isSelected = indexPath.section == self?.selectedSectionIndex
-                headerView.configure(with: header, isSelected: isSelected)
-                headerView.setTapHandler { [weak self] in
-                    self?.onSectionSelected?(indexPath.section)
+        dataSource = collectionView.sections(viewModel.sections) {
+            Header<SectionHeader, SectionHeaderView> { [weak self] view, header in
+                guard let self else { return }
+                let index = self.dataSource?.sections.firstIndex(where: { $0.header === header }) ?? -1
+                view.configure(with: header, isSelected: index == self.selectedSectionIndex)
+                view.setTapHandler { [weak self] in
+                    self?.onSectionSelected?(index)
                 }
-                return headerView
             }
-        )
-
-        // Bind to Kotlin Flow
-        dataSource.bind(to: viewModel.sections)
+            Row<Item, SectionItemCell> { cell, item in
+                cell.configure(with: item)
+            }
+        }
     }
 
 }

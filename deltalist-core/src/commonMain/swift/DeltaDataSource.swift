@@ -26,7 +26,7 @@ public class DeltaCollectionDataSource<T: AnyObject>: NSObject,
 
     // MARK: - Properties
 
-    private weak var collectionView: UICollectionView?
+    weak var collectionView: UICollectionView?
     private(set) public var items: [T] = []
     private var task: Task<Void, Never>?
     private var hasReceivedInitialData = false
@@ -475,7 +475,7 @@ public class SectionedDeltaCollectionDataSource<H: AnyObject, T: AnyObject>: NSO
 
     // MARK: - Properties
 
-    private weak var collectionView: UICollectionView?
+    weak var collectionView: UICollectionView?
     private(set) public var sections: [SectionData] = []
     private var task: Task<Void, Never>?
     private var hasReceivedInitialData = false
