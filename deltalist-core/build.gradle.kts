@@ -6,6 +6,7 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.android.library)
     alias(libs.plugins.skie)
     alias(libs.plugins.maven.publish)
 }
@@ -23,6 +24,10 @@ skie {
 
 kotlin {
     jvm()
+
+    // Android consumers (e.g. basekit's KMP modules, which all include an androidTarget) reference
+    // Delta types from commonMain, so core must publish an android variant alongside jvm/js/ios.
+    androidTarget { publishLibraryVariants("release") }
 
     js(IR) {
         browser()
@@ -52,5 +57,19 @@ kotlin {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
         }
+    }
+}
+
+android {
+    namespace = "com.latenighthack.deltalist"
+    compileSdk = 34
+
+    defaultConfig {
+        minSdk = 24
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 }
