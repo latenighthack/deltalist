@@ -24,7 +24,10 @@ kotlin {
     listOf(
         iosX64(),
         iosArm64(),
-        iosSimulatorArm64()
+        iosSimulatorArm64(),
+        // macOS is here so the AppKit/SwiftUI Mac demo can link the same shared view models.
+        macosArm64(),
+        macosX64()
     ).forEach { target ->
         target.binaries.framework {
             baseName = "DemoCore"

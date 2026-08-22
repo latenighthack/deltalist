@@ -37,10 +37,14 @@ kotlin {
 
     val xcf = XCFramework("DeltaListCore")
 
+    // Every Apple target the core klib + DeltaListCore framework is built for. macOS is here so
+    // AppKit consumers (and basekit's AppKit ViewModel bindings) can link the same framework.
     listOf(
         iosX64(),
         iosArm64(),
-        iosSimulatorArm64()
+        iosSimulatorArm64(),
+        macosArm64(),
+        macosX64()
     ).forEach { target ->
         target.binaries.framework {
             baseName = "DeltaListCore"

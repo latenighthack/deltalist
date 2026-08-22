@@ -28,6 +28,29 @@
 		001A00053 /* DragDropViewModelAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00053 /* DragDropViewModelAdapter.swift */; };
 		001A00054 /* SharedTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00054 /* SharedTypes.swift */; };
 		001A00060 /* DemoCore in Frameworks */ = {isa = PBXBuildFile; productRef = 001B00060 /* DemoCore */; };
+		004A00001 /* DemoAppMac.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004B00001 /* DemoAppMac.swift */; };
+		004A00002 /* ContentMacView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004B00002 /* ContentMacView.swift */; };
+		004A00003 /* MacViewSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004B00003 /* MacViewSupport.swift */; };
+		004A00004 /* BasicListMacView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004B00004 /* BasicListMacView.swift */; };
+		004A00005 /* PaginatedListMacView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004B00005 /* PaginatedListMacView.swift */; };
+		004A00006 /* BottomPaginatedListMacView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004B00006 /* BottomPaginatedListMacView.swift */; };
+		004A00007 /* SectionedListMacView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004B00007 /* SectionedListMacView.swift */; };
+		004A00008 /* SortedListMacView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004B00008 /* SortedListMacView.swift */; };
+		004A00009 /* DragDropMacView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004B00009 /* DragDropMacView.swift */; };
+		004A00010 /* NotificationsMacView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004B00010 /* NotificationsMacView.swift */; };
+		004A00011 /* MacCollectionSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004B00011 /* MacCollectionSupport.swift */; };
+		004A00012 /* BasicListCollectionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004B00012 /* BasicListCollectionController.swift */; };
+		004A00013 /* PaginatedListCollectionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004B00013 /* PaginatedListCollectionController.swift */; };
+		004A00014 /* BottomPaginatedListCollectionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004B00014 /* BottomPaginatedListCollectionController.swift */; };
+		004A00015 /* SectionedListCollectionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004B00015 /* SectionedListCollectionController.swift */; };
+		004A00016 /* SortedListCollectionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004B00016 /* SortedListCollectionController.swift */; };
+		004A00017 /* DragDropCollectionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 004B00017 /* DragDropCollectionController.swift */; };
+		004A00020 /* SharedTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00054 /* SharedTypes.swift */; };
+		004A00021 /* PaginatedListViewModelAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00051 /* PaginatedListViewModelAdapter.swift */; };
+		004A00022 /* BottomPaginatedListViewModelAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00052 /* BottomPaginatedListViewModelAdapter.swift */; };
+		004A00023 /* DragDropViewModelAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 001B00053 /* DragDropViewModelAdapter.swift */; };
+		004A00030 /* DemoCore in Frameworks */ = {isa = PBXBuildFile; productRef = 004B00060 /* DemoCore */; };
+		004A00031 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 001B00003 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -52,6 +75,24 @@
 		001B00053 /* DragDropViewModelAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DragDropViewModelAdapter.swift; sourceTree = "<group>"; };
 		001B00054 /* SharedTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedTypes.swift; sourceTree = "<group>"; };
 		001C00001 /* DemoApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DemoApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		004B00001 /* DemoAppMac.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoAppMac.swift; sourceTree = "<group>"; };
+		004B00002 /* ContentMacView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentMacView.swift; sourceTree = "<group>"; };
+		004B00003 /* MacViewSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacViewSupport.swift; sourceTree = "<group>"; };
+		004B00004 /* BasicListMacView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BasicListMacView.swift; sourceTree = "<group>"; };
+		004B00005 /* PaginatedListMacView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaginatedListMacView.swift; sourceTree = "<group>"; };
+		004B00006 /* BottomPaginatedListMacView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomPaginatedListMacView.swift; sourceTree = "<group>"; };
+		004B00007 /* SectionedListMacView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionedListMacView.swift; sourceTree = "<group>"; };
+		004B00008 /* SortedListMacView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SortedListMacView.swift; sourceTree = "<group>"; };
+		004B00009 /* DragDropMacView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DragDropMacView.swift; sourceTree = "<group>"; };
+		004B00010 /* NotificationsMacView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsMacView.swift; sourceTree = "<group>"; };
+		004B00011 /* MacCollectionSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacCollectionSupport.swift; sourceTree = "<group>"; };
+		004B00012 /* BasicListCollectionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BasicListCollectionController.swift; sourceTree = "<group>"; };
+		004B00013 /* PaginatedListCollectionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaginatedListCollectionController.swift; sourceTree = "<group>"; };
+		004B00014 /* BottomPaginatedListCollectionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BottomPaginatedListCollectionController.swift; sourceTree = "<group>"; };
+		004B00015 /* SectionedListCollectionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionedListCollectionController.swift; sourceTree = "<group>"; };
+		004B00016 /* SortedListCollectionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SortedListCollectionController.swift; sourceTree = "<group>"; };
+		004B00017 /* DragDropCollectionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DragDropCollectionController.swift; sourceTree = "<group>"; };
+		004C00001 /* DemoAppMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DemoAppMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -63,6 +104,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		004D00001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				004A00030 /* DemoCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -70,6 +119,7 @@
 			isa = PBXGroup;
 			children = (
 				001E00002 /* DemoApp */,
+				004E00002 /* DemoAppMac */,
 				001E00010 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -129,8 +179,49 @@
 			isa = PBXGroup;
 			children = (
 				001C00001 /* DemoApp.app */,
+				004C00001 /* DemoAppMac.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		004E00002 /* DemoAppMac */ = {
+			isa = PBXGroup;
+			children = (
+				004B00001 /* DemoAppMac.swift */,
+				004B00002 /* ContentMacView.swift */,
+				004E00005 /* SwiftUI */,
+				004E00006 /* AppKit */,
+			);
+			path = DemoAppMac;
+			sourceTree = "<group>";
+		};
+		004E00005 /* SwiftUI */ = {
+			isa = PBXGroup;
+			children = (
+				004B00003 /* MacViewSupport.swift */,
+				004B00004 /* BasicListMacView.swift */,
+				004B00005 /* PaginatedListMacView.swift */,
+				004B00006 /* BottomPaginatedListMacView.swift */,
+				004B00007 /* SectionedListMacView.swift */,
+				004B00008 /* SortedListMacView.swift */,
+				004B00009 /* DragDropMacView.swift */,
+				004B00010 /* NotificationsMacView.swift */,
+			);
+			path = SwiftUI;
+			sourceTree = "<group>";
+		};
+		004E00006 /* AppKit */ = {
+			isa = PBXGroup;
+			children = (
+				004B00011 /* MacCollectionSupport.swift */,
+				004B00012 /* BasicListCollectionController.swift */,
+				004B00013 /* PaginatedListCollectionController.swift */,
+				004B00014 /* BottomPaginatedListCollectionController.swift */,
+				004B00015 /* SectionedListCollectionController.swift */,
+				004B00016 /* SortedListCollectionController.swift */,
+				004B00017 /* DragDropCollectionController.swift */,
+			);
+			path = AppKit;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -156,6 +247,26 @@
 			productReference = 001C00001 /* DemoApp.app */;
 			productType = "com.apple.product-type.application";
 		};
+		004F00001 /* DemoAppMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 004100001 /* Build configuration list for PBXNativeTarget "DemoAppMac" */;
+			buildPhases = (
+				005000001 /* Sources */,
+				004D00001 /* Frameworks */,
+				005000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DemoAppMac;
+			packageProductDependencies = (
+				004B00060 /* DemoCore */,
+			);
+			productName = DemoAppMac;
+			productReference = 004C00001 /* DemoAppMac.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -167,6 +278,9 @@
 				LastUpgradeCheck = 1500;
 				TargetAttributes = {
 					001F00001 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+					004F00001 = {
 						CreatedOnToolsVersion = 15.0;
 					};
 				};
@@ -188,6 +302,7 @@
 			projectRoot = "";
 			targets = (
 				001F00001 /* DemoApp */,
+				004F00001 /* DemoAppMac */,
 			);
 		};
 /* End PBXProject section */
@@ -198,6 +313,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				001A00003 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		005000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				004A00031 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -227,6 +350,34 @@
 				001A00044 /* BottomPaginatedListViewController.swift in Sources */,
 				001A00042 /* SectionedListViewController.swift in Sources */,
 				001A00043 /* DragDropViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		005000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				004A00001 /* DemoAppMac.swift in Sources */,
+				004A00002 /* ContentMacView.swift in Sources */,
+				004A00003 /* MacViewSupport.swift in Sources */,
+				004A00020 /* SharedTypes.swift in Sources */,
+				004A00021 /* PaginatedListViewModelAdapter.swift in Sources */,
+				004A00022 /* BottomPaginatedListViewModelAdapter.swift in Sources */,
+				004A00023 /* DragDropViewModelAdapter.swift in Sources */,
+				004A00004 /* BasicListMacView.swift in Sources */,
+				004A00005 /* PaginatedListMacView.swift in Sources */,
+				004A00006 /* BottomPaginatedListMacView.swift in Sources */,
+				004A00007 /* SectionedListMacView.swift in Sources */,
+				004A00008 /* SortedListMacView.swift in Sources */,
+				004A00009 /* DragDropMacView.swift in Sources */,
+				004A00010 /* NotificationsMacView.swift in Sources */,
+				004A00011 /* MacCollectionSupport.swift in Sources */,
+				004A00012 /* BasicListCollectionController.swift in Sources */,
+				004A00013 /* PaginatedListCollectionController.swift in Sources */,
+				004A00014 /* BottomPaginatedListCollectionController.swift in Sources */,
+				004A00015 /* SectionedListCollectionController.swift in Sources */,
+				004A00016 /* SortedListCollectionController.swift in Sources */,
+				004A00017 /* DragDropCollectionController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -412,6 +563,60 @@
 			};
 			name = Release;
 		};
+		004300001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = W7843MNFQV;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.latenighthack.deltalist.demo.mac;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		004300002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = W7843MNFQV;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.latenighthack.deltalist.demo.mac;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -433,6 +638,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		004100001 /* Build configuration list for PBXNativeTarget "DemoAppMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				004300001 /* Debug */,
+				004300002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -444,6 +658,10 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		001B00060 /* DemoCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DemoCore;
+		};
+		004B00060 /* DemoCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = DemoCore;
 		};

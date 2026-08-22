@@ -49,8 +49,8 @@ jobs:
           path: '**/build/reports/tests/**'
           if-no-files-found: ignore
 
-  ios:
-    name: iOS tests + XCFramework
+  apple:
+    name: Apple tests + macOS link + XCFramework
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -67,13 +67,27 @@ jobs:
       - name: Run common tests on iOS simulator
         run: ./gradlew :deltalist-core:iosSimulatorArm64Test --stacktrace
 
+      - name: Compile macOS targets
+        run: ./gradlew :deltalist-core:compileKotlinMacosArm64 :deltalist-core:compileKotlinMacosX64 --stacktrace
+
+      # Linking is what compiles the bundled Swift under src/commonMain/swift. Without this the
+      # AppKit-only DeltaNSCollectionDataSource (+Sectioned/+Stable/DeltaNSRows) is never
+      # type-checked by CI.
+      - name: Link macOS framework (compiles the AppKit bundled Swift)
+        run: ./gradlew :deltalist-core:linkDebugFrameworkMacosArm64 :deltalist-core:linkDebugFrameworkMacosX64 --stacktrace
+
+      # Same for the demo module's AppKit bundled Swift (DeltaNSDataSourceExtensions), which the
+      # macOS demo (demo-ios/DemoAppMac) links.
+      - name: Link demo-core macOS framework (compiles demo AppKit bundled Swift)
+        run: ./gradlew :demo-core:linkDebugFrameworkMacosArm64 :demo-core:linkDebugFrameworkMacosX64 --stacktrace
+
       - name: Assemble release XCFramework
         run: ./gradlew :deltalist-core:assembleDeltaListCoreReleaseXCFramework --stacktrace
 
-      - name: Upload iOS test reports
+      - name: Upload Apple test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ios-test-reports
+          name: apple-test-reports
           path: '**/build/reports/tests/**'
           if-no-files-found: ignore
