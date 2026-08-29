@@ -152,7 +152,7 @@ public final class DeltaList<T: AnyObject>: ObservableObject {
         do {
             for try await value in flow {
                 if Task.isCancelled { break }
-                apply(value as AnyObject)
+                applyValue(value as AnyObject)
             }
         } catch {
             onError?(error)
@@ -193,7 +193,14 @@ public final class DeltaList<T: AnyObject>: ObservableObject {
 
     // MARK: Application
 
-    private func apply(_ value: AnyObject) {
+    /// Applies one delta emitted by an externally-owned collector. Generated ViewModel list
+    /// bindings use this to keep stream ownership outside DeltaList while reusing this class's
+    /// native extraction, soft-list, and animation behavior.
+    public func apply(delta value: Any) {
+        applyValue(value as AnyObject)
+    }
+
+    private func applyValue(_ value: AnyObject) {
         // Always read through loadedItems()/totalSize(): touching `delta.items` bridges and
         // force-loads the entire backing list, and `as!` crashes on erased/heterogeneous elements.
         // Cascade mirrors the sectioned wrapper: same-module cast, SKIE-erased cast, then

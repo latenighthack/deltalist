@@ -76,12 +76,12 @@ But the platform story is uneven:
 - **iOS:** *works in the demo* (UIKit + SwiftUI, drag-drop, pagination, sections) via SKIE, but the
   iOS glue lives inside `demo-ios` / `demo-core/swift` — **there is no shippable iOS binding
   module**. An adopter must lift demo code.
-- **JS/React:** `useDeltaList` works via a clever `SoftList`→JS-array proxy, but it **replaces the
-  whole list each emission** (no incremental mapping) and **never releases `LazyList` items** (a
-  leak in any real React app). Early-alpha.
+- **JS/React:** `useDeltaList` exposes one stable delegated array proxy. Ordinary iteration skips
+  unloaded positions without fetching them; indexed reads acquire lazy values, and virtualizers use
+  `visibleRange` for release and paginated requests. The runtime is component-agnostic.
 
-**Verdict:** Compelling as a *pattern* for KMP, but only Android is turnkey. iOS needs packaging;
-React needs real work.
+**Verdict:** Compelling as a *pattern* for KMP. Android is the most mature binding; React now has a
+small native hook boundary, while iOS still needs packaging.
 
 ---
 
@@ -111,7 +111,7 @@ subtle production bug will hide. They need a property-based oracle (see §5), no
   `SectionedConcat`, `GroupBy`, `Section`, `SectionedDelta` have *zero* dedicated tests, yet sections
   are a headline feature with their own demo screen.
 - **Binding tests barely exist.** Only `notifications` has a unit test (`TrayControllerTest`), and
-  **CI doesn't even run it** (no `testDebugUnitTest` job). RecyclerView, Compose, and React have none
+  **CI doesn't even run it** (no `testDebugUnitTest` job). RecyclerView and Compose have none
   — so the most crash-prone integration code (index translation → framework APIs) is unverified by CI.
 
 ### 3.4 Not consumable as an artifact
@@ -130,7 +130,8 @@ whose whole value is being a dependency, this is the single biggest gap between 
 - `GroupBy` and the sectioned-concat paths fall back to `Reload` aggressively (any multi-section
   change), trading the library's core benefit (incrementality) for safety.
 - `Diff` Phase 2 is O(n²) (`indexOf`/`removeAt`/`add`) on large reorders.
-- React binding has no LazyList lifecycle and no incremental path.
+- React reconciliation still consumes snapshots rather than individual Delta operations, although
+  the delegated proxy avoids array replacement and owns LazyList lifecycle.
 - Single-author bus-factor of 1; no `CONTRIBUTING`, no published API docs, one-line README.
 
 ---
@@ -186,7 +187,7 @@ whose whole value is being a dependency, this is the single biggest gap between 
 | Operator layer | ★★★☆☆ | Diff/StableIds/Map/LazyMap solid; Concat bug, Filter/Paginated heuristics risky |
 | Android bindings | ★★★★☆ | RecyclerView + notifications production-grade; Compose lazy footgun |
 | iOS bindings | ★★★☆☆ | Works in demo via SKIE, but not packaged as a module |
-| React/JS binding | ★★☆☆☆ | Functional but no lazy lifecycle, no incremental path |
+| React/JS binding | ★★★★☆ | Stable iterable proxy, sparse pagination and lazy lifecycle; React still reconciles snapshots |
 | Test coverage (overall) | ★★★☆☆ | Core strong; sections + bindings barely covered; CI gaps |
 | Packaging / consumability | ★☆☆☆☆ | No publishing infra — source inclusion only |
 | Docs & project health | ★★★☆☆ | Superb in-code KDoc; thin README, bus-factor 1 |
@@ -203,7 +204,7 @@ confirmed `concat` correctness bug, **(2)** the complete absence of publishable 
 
 - **Adopt now if:** you're an Android team comfortable vendoring it as source, with churny lists,
   and you avoid `concat`/multi-source-mutation paths until §3.1 is fixed.
-- **Wait if:** you need a Maven/SPM/npm dependency, a turnkey iOS or React binding, or you lean
+- **Wait if:** you need a Maven/SPM/npm dependency, a turnkey iOS binding, or you lean
   heavily on sections and pagination — give it one more hardening cycle.
 
 The gap from here to a 4.5★ "ship it" is **execution, not invention**: fix one bug, add an oracle

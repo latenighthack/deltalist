@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { List, AutoSizer, CellMeasurer, CellMeasurerCache } from 'react-virtualized';
-import { useDeltaList, useSoftDeltaList, useFlow } from 'demo-core';
+import { useDeltaList, useFlow } from 'demo-core';
 
 // --- Basic List Demo ---
 
@@ -114,10 +114,7 @@ function SectionedListDemo({ vm }) {
 // A not-yet-loaded row rendered as a skeleton item (no spinner, no text). Triggers the fetch on
 // mount (mirrors iOS .onAppear / Android's soft.request() in the row body). Because the list is
 // virtualized, only rows scrolled into view mount, so only visible placeholders drive pagination.
-function SkeletonRow({ request }) {
-    useEffect(() => {
-        if (request) request();
-    }, [request]);
+function SkeletonRow() {
     return (
         <div className="item-card skeleton-row">
             <span className="skeleton-bar" />
@@ -126,7 +123,8 @@ function SkeletonRow({ request }) {
 }
 
 function PaginatedListDemo({ vm }) {
-    const list = useSoftDeltaList(vm.items);
+    const list = useDeltaList(vm.items);
+    const revision = list.revision;
     const loadingDirection = useFlow(vm.loadingDirection, null);
     const loadedCount = useFlow(vm.loadedCount, 0);
     const excludeDivisors = useFlow(vm.excludeDivisors, []);
@@ -144,27 +142,28 @@ function PaginatedListDemo({ vm }) {
     // new delta snapshot arrives so loaded values replace their placeholders.
     useEffect(() => {
         if (listRef.current) listRef.current.forceUpdateGrid();
-    }, [list]);
+    }, [revision]);
 
     const rowRenderer = useCallback(({ index, key, parent, style }) => {
-        const cell = list.get(index);
+        const value = list[index];
+        const loaded = value !== undefined;
         return (
             <CellMeasurer cache={cache} columnIndex={0} key={key} parent={parent} rowIndex={index}>
                 {({ registerChild }) => (
                     <div ref={registerChild} style={{ ...style, paddingBottom: 6 }}>
-                        {cell.loaded ? (
+                        {loaded ? (
                             <div className="item-card">
-                                <span className="item-title">#{cell.value}</span>
+                                <span className="item-title">#{value}</span>
                                 <span className="item-id">index: {index}</span>
                             </div>
                         ) : (
-                            <SkeletonRow request={cell.request} />
+                            <SkeletonRow />
                         )}
                     </div>
                 )}
             </CellMeasurer>
         );
-    }, [list, cache]);
+    }, [list, cache, revision]);
 
     const divisors = [2, 3, 5, 7, 11];
 
@@ -188,6 +187,7 @@ function PaginatedListDemo({ vm }) {
                             deferredMeasurementCache={cache}
                             rowHeight={cache.rowHeight}
                             rowRenderer={rowRenderer}
+                            onRowsRendered={({ startIndex, stopIndex }) => list.visibleRange(startIndex, stopIndex)}
                             overscanRowCount={5}
                         />
                     )}
@@ -215,7 +215,8 @@ function PaginatedListDemo({ vm }) {
 // Chat-style pagination: starts scrolled to the bottom, only the bottom items load first, and
 // scrolling up loads older pages. Buttons add an item at index 0 (top) and at index n (bottom).
 function BottomPaginatedListDemo({ vm }) {
-    const list = useSoftDeltaList(vm.messages);
+    const list = useDeltaList(vm.messages);
+    const revision = list.revision;
     const loadingDirection = useFlow(vm.loadingDirection, null);
     const loadedCount = useFlow(vm.loadedCount, 0);
     const excludeDivisors = useFlow(vm.excludeDivisors, []);
@@ -241,31 +242,32 @@ function BottomPaginatedListDemo({ vm }) {
             listRef.current.scrollToRow(list.size - 1);
             pendingBottomRef.current = false;
         }
-    }, [list]);
+    }, [revision]);
 
     const rowRenderer = useCallback(({ index, key, parent, style }) => {
-        const cell = list.get(index);
+        const value = list[index];
+        const loaded = value !== undefined;
         // Manually-added items use negative values so they never collide with the paginated data.
-        const isAdded = cell.loaded && cell.value < 0;
+        const isAdded = loaded && value < 0;
         return (
             <CellMeasurer cache={cache} columnIndex={0} key={key} parent={parent} rowIndex={index}>
                 {({ registerChild }) => (
                     <div ref={registerChild} style={{ ...style, paddingBottom: 6 }}>
-                        {cell.loaded ? (
+                        {loaded ? (
                             <div className="item-card">
                                 <span className={`item-title ${isAdded ? 'added-title' : ''}`}>
-                                    {isAdded ? `Added #${-cell.value}` : `#${cell.value}`}
+                                    {isAdded ? `Added #${-value}` : `#${value}`}
                                 </span>
                                 <span className="item-id">index: {index}</span>
                             </div>
                         ) : (
-                            <SkeletonRow request={cell.request} />
+                            <SkeletonRow />
                         )}
                     </div>
                 )}
             </CellMeasurer>
         );
-    }, [list, cache]);
+    }, [list, cache, revision]);
 
     const divisors = [2, 3, 5, 7, 11];
 
@@ -293,6 +295,7 @@ function BottomPaginatedListDemo({ vm }) {
                             deferredMeasurementCache={cache}
                             rowHeight={cache.rowHeight}
                             rowRenderer={rowRenderer}
+                            onRowsRendered={({ startIndex, stopIndex }) => list.visibleRange(startIndex, stopIndex)}
                             overscanRowCount={5}
                         />
                     )}

@@ -16,5 +16,8 @@ kotlin {
             implementation(libs.kotlin.react)
             implementation(libs.kotlin.react.dom)
         }
+        jsTest.dependencies {
+            implementation(kotlin("test"))
+        }
     }
 }

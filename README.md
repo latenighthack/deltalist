@@ -108,10 +108,39 @@ let dataSource = DeltaCollectionDataSource<Item>(
 dataSource.bind(erased: viewModel.items)
 ```
 
+### Apple — generated ViewModel list bindings
+
+Frameworks such as BaseKit can adapt child ViewModels without replacing DeltaList's native engines.
+Their generated `ViewModelListBinding<Raw, Element>` carries the original stream, exact child
+classifier, identity, and row observation hook. It intentionally has no public map/filter/sort API:
+semantic list transformations belong upstream in the ViewModel.
+
+```swift
+// SwiftUI (iOS and macOS)
+DeltaListView(model.items) { ItemRow(model: $0) }
+
+// Embeddable in a stack, grid, menu, or custom container
+DeltaForEach(model.items) { ItemBadge(model: $0) }
+
+// Soft/paginated list with unloaded slots
+DeltaLazyListView(model.items, loading: { _ in ProgressView() }) { ItemRow(model: $0) }
+
+// UIKit; the collection view retains the native DeltaCollectionDataSource
+collectionView.items(model.items, cell: ItemCell.self)
+
+// AppKit
+collectionView.items(model.items, item: ItemCollectionViewItem.self)
+```
+
+Polymorphic bindings use a reusable `DeltaUICollectionViewCellMap` or
+`DeltaNSCollectionViewItemMap`; the binding element is a generated, exhaustive, list-specific enum.
+
 ### React
 
-The `useDeltaList` hook (`deltalist-react`) collects the list and returns an
-array-like view of the loaded items.
+The `useDeltaList` hook (`deltalist-react`) returns one stable JavaScript `Proxy` that delegates
+array reads to the current DeltaList snapshot. It supports indexed access, `map`, `forEach`, and
+regular iteration without materializing a new array for every delta. Loaded lazy values are acquired
+on access and released when the snapshot changes or the hook unmounts.
 
 ```jsx
 import { useDeltaList } from 'your-kmp-module';
@@ -128,3 +157,22 @@ function ItemList({ viewModel }) {
 }
 ```
 
+Soft positions are represented as sparse array holes, so ordinary iteration never fetches every
+estimated row. Virtualized lists delegate their viewport explicitly:
+
+```jsx
+const items = useDeltaList(viewModel.items)
+
+<VirtualList
+    rowCount={items.totalSize}
+    rowRenderer={({ index }) => items[index] === undefined
+        ? <Skeleton />
+        : <ItemRow item={items[index]} />}
+    onRowsRendered={({ startIndex, stopIndex }) =>
+        items.visibleRange(startIndex, stopIndex)}
+/>
+```
+
+`visibleRange` acquires loaded lazy values, releases values outside the new range, and requests
+unloaded positions. `revision` changes after every delta for virtualizers that cache rendered rows;
+the proxy itself intentionally remains referentially stable.

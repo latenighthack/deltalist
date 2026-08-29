@@ -5,6 +5,7 @@ import com.latenighthack.deltalist.SoftList
 import com.latenighthack.deltalist.SoftValue
 import com.latenighthack.deltalist.softGetOrNull
 import com.latenighthack.deltalist.softLoadedCount
+import com.latenighthack.deltalist.react.useDelegatedDeltaList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -16,47 +17,6 @@ import kotlinx.coroutines.launch
 private external object ReactLib {
     fun useState(initialState: dynamic): Array<dynamic>
     fun useEffect(effect: dynamic, deps: Array<Any?> = definedExternally)
-}
-
-/**
- * Creates a JS Proxy wrapping the delta items list.
- * The proxy presents only loaded items (stopping at the first NotLoaded)
- * and defers item access to softGetOrNull — no eager copy.
- *
- * Array.isArray returns true for a Proxy wrapping [], so React
- * treats it as a normal array. .map(), .forEach(), etc. all work
- * because they read `length` and indexed properties through the
- * proxy get trap, then fall back to Array.prototype for methods.
- */
-private fun createItemsProxy(items: SoftList<Any?>): dynamic {
-    val loadedCount = items.softLoadedCount()
-
-    val handler: dynamic = js("({})")
-
-    handler.get = fun(target: dynamic, prop: dynamic, _receiver: dynamic): dynamic {
-        if (jsTypeOf(prop) == "symbol") return target[prop]
-        val propStr = prop.unsafeCast<String>()
-        if (propStr == "length") return loadedCount
-        val index = propStr.toIntOrNull()
-        if (index != null && index >= 0 && index < loadedCount) {
-            return when (val soft = items.softGetOrNull(index)) {
-                is SoftValue.Present -> soft.value
-                else -> js("undefined")
-            }
-        }
-        return target[prop]
-    }
-
-    // Required: Array.prototype.map checks HasProperty(proxy, "0") etc.
-    // Without this trap the check falls through to the empty [] target
-    // and every index returns false, so .map() produces an empty result.
-    handler.has = fun(_target: dynamic, prop: dynamic): Boolean {
-        if (jsTypeOf(prop) == "symbol") return true
-        val index = prop.unsafeCast<String>().toIntOrNull()
-        return if (index != null) index >= 0 && index < loadedCount else true
-    }
-
-    return js("new Proxy([], handler)")
 }
 
 /**
@@ -130,34 +90,7 @@ fun useSoftDeltaList(deltaList: Any): Any {
 @OptIn(ExperimentalJsExport::class)
 @JsExport
 fun useDeltaList(deltaList: Any): Any {
-    val state = ReactLib.useState(js("[]"))
-    val setItems = state[1]
-
-    ReactLib.useEffect({
-        // scope.cancel() is cooperative, so a collector can deliver one more emission after
-        // cleanup runs. On a rapid prop change the previous and next collectors would both
-        // call setItems, causing a flicker. This flag (flipped synchronously in cleanup on
-        // JS's single thread) gates any stale emission from the cancelled collector.
-        var active = true
-        val scope = CoroutineScope(SupervisorJob())
-
-        @Suppress("UNCHECKED_CAST")
-        val flow = deltaList as Flow<Delta<Any?>>
-
-        scope.launch {
-            flow.collect { delta ->
-                if (active) setItems(createItemsProxy(delta.items))
-            }
-        }
-
-        val cleanup: () -> Unit = {
-            active = false
-            scope.cancel()
-        }
-        cleanup
-    }, arrayOf(deltaList))
-
-    return state[0]
+    return useDelegatedDeltaList(deltaList)
 }
 
 @OptIn(ExperimentalJsExport::class)
