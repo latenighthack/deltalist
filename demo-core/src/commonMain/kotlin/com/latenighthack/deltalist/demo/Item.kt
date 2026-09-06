@@ -45,6 +45,12 @@ class TickingItem(
     }
 }
 
+/**
+ * The row a list carries while it is empty (see `DeltaList.ifEmpty`). Being an ordinary item means
+ * the empty state scrolls and lays out like any other cell instead of floating over the list.
+ */
+data object EmptyStateRow
+
 data class SectionHeader(val title: String, val color: Long)
 
 sealed class SectionRow {

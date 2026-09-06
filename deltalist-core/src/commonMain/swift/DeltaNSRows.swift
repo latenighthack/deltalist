@@ -383,6 +383,7 @@ extension NSCollectionView {
 extension DeltaNSCollectionDataSource {
     /// Shows `view` while the list is empty, hides it otherwise. Composes with any previously set
     /// `onItemsChanged`; setting `onItemsChanged` afterwards replaces this behavior.
+    @available(*, deprecated, message: "Overlay empty states don't scroll with the list and aren't data-bound. Use the Kotlin `ifEmpty { }` operator to inject a placeholder item view model and register a Row spec for it; any layout invalidation this did moves into your section provider.")
     @discardableResult
     public func emptyView(_ view: NSView) -> Self {
         let previous = onItemsChanged
@@ -398,6 +399,7 @@ extension DeltaNSCollectionDataSource {
 @available(macOS 11.0, *)
 extension SectionedDeltaNSCollectionDataSource {
     /// Shows `view` while the section whose header matches `headerType` is empty or absent.
+    @available(*, deprecated, message: "Overlay empty states don't scroll with the list and aren't data-bound. Use the Kotlin `ifEmpty { }` operator to inject a placeholder item view model and register a Row spec for it; any layout invalidation this did moves into your section provider.")
     @discardableResult
     public func emptyView<MatchedHeader>(_ view: NSView, whenEmpty headerType: MatchedHeader.Type) -> Self {
         let previous = onSectionsChanged
@@ -410,6 +412,7 @@ extension SectionedDeltaNSCollectionDataSource {
     }
 
     /// Shows `view` while every section is empty.
+    @available(*, deprecated, message: "Overlay empty states don't scroll with the list and aren't data-bound. Use the Kotlin `ifEmpty { }` operator to inject a placeholder item view model and register a Row spec for it; any layout invalidation this did moves into your section provider.")
     @discardableResult
     public func emptyView(_ view: NSView) -> Self {
         let previous = onSectionsChanged

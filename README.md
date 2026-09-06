@@ -32,6 +32,24 @@ class ListViewModel {
 Every binding below consumes the same `viewModel.items`; only the view layer
 differs.
 
+#### Empty states are rows, not overlays
+
+`ifEmpty` substitutes a single placeholder item while the list is empty, so the
+empty state scrolls and lays out like any other cell and is bound to its own item
+model — instead of being an overlay view toggled off item counts. Apply it last,
+after any `lazyMap`, and before `sectionedDeltaList`/`concat`/`header` (per-section
+placeholders come from applying it to each section's list):
+
+```kotlin
+val rows: DeltaList<Row> = _items
+    .lazyMap<Item, Row> { Row.Content(it) }
+    .ifEmpty { Row.Empty }
+```
+
+The placeholder factory runs at most once per collection and its instance is
+reused, so binders that key per-row state on item identity see one stable row.
+Emptiness is total size, so a paginated list with an unloaded tail is not empty.
+
 ### Android — Jetpack Compose
 
 Collect the list as Compose state with `collectAsDeltaState()`

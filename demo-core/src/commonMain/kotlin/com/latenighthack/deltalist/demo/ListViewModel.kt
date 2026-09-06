@@ -3,6 +3,7 @@ package com.latenighthack.deltalist.demo
 import com.latenighthack.deltalist.DeltaList
 import com.latenighthack.deltalist.StableItem
 import com.latenighthack.deltalist.mutableDeltaListOf
+import com.latenighthack.deltalist.operators.ifEmpty
 import com.latenighthack.deltalist.operators.lazyMap
 import com.latenighthack.deltalist.operators.withStableIds
 import kotlinx.coroutines.CoroutineScope
@@ -21,6 +22,14 @@ class ListViewModel {
     val tickingItems: DeltaList<StableItem<TickingItem>> = _items
         .lazyMap { item -> TickingItem(item, tickingScope) }
         .withStableIds()
+
+    /**
+     * Same items, plus an [EmptyStateRow] whenever the list is empty (tap "Clear" to see it).
+     * `ifEmpty` goes last, after `lazyMap`: the placeholder is a row, not a domain model.
+     */
+    val itemsWithEmptyState: DeltaList<Any> = _items
+        .lazyMap<Item, Any> { it }
+        .ifEmpty { EmptyStateRow }
 
     private var counter = 0
 
