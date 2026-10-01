@@ -15,46 +15,50 @@ fun <T> concatSections(flows: List<DeltaList<T>>): DeltaList<T> {
     if (flows.isEmpty()) return flowOf(Delta(emptyList<T>().asSoftList(), Change.Reload))
     if (flows.size == 1) return flows[0]
 
-    // Per-source previous emissions: under `combine`, only the source whose Delta reference
-    // changed actually emitted this tick; the rest carry stale changes that must not be replayed.
-    var prevDeltas: Array<Delta<T>>? = null
-    var prevCombinedLoaded: List<T>? = null
+    return flow {
+        // Per-source previous emissions: under `combine`, only the source whose Delta reference
+        // changed actually emitted this tick; the rest carry stale changes that must not be replayed.
+        var prevDeltas: Array<Delta<T>>? = null
+        var prevCombinedLoaded: List<T>? = null
 
-    return combine(flows) { deltas ->
-        val combinedItems = ConcatenatedMultiList(deltas.map { it.items })
-        val newLoaded = combinedItems.softLoadedItems()
+        emitAll(
+            combine(flows) { deltas ->
+                val combinedItems = ConcatenatedMultiList(deltas.map { it.items })
+                val newLoaded = combinedItems.softLoadedItems()
 
-        val previous = prevDeltas
-        val fullyLoaded = newLoaded.size == combinedItems.size
+                val previous = prevDeltas
+                val fullyLoaded = newLoaded.size == combinedItems.size
 
-        val emitterReloaded = deltas.withIndex().any { (i, d) ->
-            (previous == null || d !== previous[i]) && d.change is Change.Reload
-        }
-
-        val change: Change = if (previous == null || emitterReloaded || !fullyLoaded) {
-            Change.Reload
-        } else {
-            val ops = mutableListOf<Mutation>()
-            for ((index, delta) in deltas.withIndex()) {
-                val emitted = delta !== previous[index]
-                val mutations = delta.change as? Change.Mutations
-                if (emitted && mutations != null) {
-                    val offset = deltas.take(index).sumOf { it.items.size }
-                    mutations.operations.forEach { ops += it.offsetBy(offset) }
+                val emitterReloaded = deltas.withIndex().any { (i, d) ->
+                    (previous == null || d !== previous[i]) && d.change is Change.Reload
                 }
-            }
-            val prev = prevCombinedLoaded
-            if (ops.isEmpty() || prev == null) {
-                Change.Reload
-            } else {
-                val rebuilt = runCatching { applyChange(prev, Change.Mutations(ops), newLoaded) }.getOrNull()
-                if (rebuilt == newLoaded) Change.Mutations(ops) else Change.Reload
-            }
-        }
 
-        prevDeltas = deltas.copyOf()
-        prevCombinedLoaded = newLoaded
-        Delta(combinedItems, change)
+                val change: Change = if (previous == null || emitterReloaded || !fullyLoaded) {
+                    Change.Reload
+                } else {
+                    val ops = mutableListOf<Mutation>()
+                    for ((index, delta) in deltas.withIndex()) {
+                        val emitted = delta !== previous[index]
+                        val mutations = delta.change as? Change.Mutations
+                        if (emitted && mutations != null) {
+                            val offset = deltas.take(index).sumOf { it.items.size }
+                            mutations.operations.forEach { ops += it.offsetBy(offset) }
+                        }
+                    }
+                    val prev = prevCombinedLoaded
+                    if (ops.isEmpty() || prev == null) {
+                        Change.Reload
+                    } else {
+                        val rebuilt = runCatching { applyChange(prev, Change.Mutations(ops), newLoaded) }.getOrNull()
+                        if (rebuilt == newLoaded) Change.Mutations(ops) else Change.Reload
+                    }
+                }
+
+                prevDeltas = deltas.copyOf()
+                prevCombinedLoaded = newLoaded
+                Delta(combinedItems, change)
+            }
+        )
     }
 }
 
@@ -101,44 +105,48 @@ fun <S, T> sectionedDeltaList(
         itemFlow.map { delta -> header to delta }
     }
 
-    // Only the section whose Delta reference changed this tick actually emitted; stale changes
-    // on the other sections must be ignored, otherwise the operator over-reloads (or worse,
-    // attributes a change to the wrong section) once several sections have each mutated.
-    var prevDeltas: Array<Delta<T>>? = null
+    return flow {
+        // Only the section whose Delta reference changed this tick actually emitted; stale changes
+        // on the other sections must be ignored, otherwise the operator over-reloads (or worse,
+        // attributes a change to the wrong section) once several sections have each mutated.
+        var prevDeltas: Array<Delta<T>>? = null
 
-    return combine(flows) { headerDeltaPairs ->
-        val sectionList = headerDeltaPairs.map { (header, delta) ->
-            Section(header, delta.items)
-        }
-
-        val previous = prevDeltas
-        val emitterReloaded = headerDeltaPairs.withIndex().any { (i, pair) ->
-            (previous == null || pair.second !== previous[i]) && pair.second.change is Change.Reload
-        }
-
-        val change = if (previous == null || emitterReloaded) {
-            SectionedChange.Reload
-        } else {
-            // Item changes from sections that actually emitted this tick.
-            val itemChanges = headerDeltaPairs.mapIndexedNotNull { index, (_, delta) ->
-                val emitted = delta !== previous[index]
-                val mutations = delta.change as? Change.Mutations
-                if (emitted && mutations != null && mutations.operations.isNotEmpty()) {
-                    index to mutations.operations
-                } else null
-            }
-            when {
-                itemChanges.isEmpty() -> SectionedChange.Reload
-                itemChanges.size == 1 -> {
-                    val (sectionIndex, mutations) = itemChanges[0]
-                    SectionedChange.Items(sectionIndex, mutations)
+        emitAll(
+            combine(flows) { headerDeltaPairs ->
+                val sectionList = headerDeltaPairs.map { (header, delta) ->
+                    Section(header, delta.items)
                 }
-                // Multiple sections genuinely changed in one tick - reload for simplicity.
-                else -> SectionedChange.Reload
-            }
-        }
 
-        prevDeltas = Array(headerDeltaPairs.size) { headerDeltaPairs[it].second }
-        SectionedDelta(sectionList, change)
+                val previous = prevDeltas
+                val emitterReloaded = headerDeltaPairs.withIndex().any { (i, pair) ->
+                    (previous == null || pair.second !== previous[i]) && pair.second.change is Change.Reload
+                }
+
+                val change = if (previous == null || emitterReloaded) {
+                    SectionedChange.Reload
+                } else {
+                    // Item changes from sections that actually emitted this tick.
+                    val itemChanges = headerDeltaPairs.mapIndexedNotNull { index, (_, delta) ->
+                        val emitted = delta !== previous[index]
+                        val mutations = delta.change as? Change.Mutations
+                        if (emitted && mutations != null && mutations.operations.isNotEmpty()) {
+                            index to mutations.operations
+                        } else null
+                    }
+                    when {
+                        itemChanges.isEmpty() -> SectionedChange.Reload
+                        itemChanges.size == 1 -> {
+                            val (sectionIndex, mutations) = itemChanges[0]
+                            SectionedChange.Items(sectionIndex, mutations)
+                        }
+                        // Multiple sections genuinely changed in one tick - reload for simplicity.
+                        else -> SectionedChange.Reload
+                    }
+                }
+
+                prevDeltas = Array(headerDeltaPairs.size) { headerDeltaPairs[it].second }
+                SectionedDelta(sectionList, change)
+            }
+        )
     }
 }

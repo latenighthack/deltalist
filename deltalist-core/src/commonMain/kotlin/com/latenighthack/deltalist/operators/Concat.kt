@@ -11,6 +11,8 @@ import com.latenighthack.deltalist.applyChange
 import com.latenighthack.deltalist.asSoftList
 import com.latenighthack.deltalist.softLoadedItems
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 
 /**
@@ -33,50 +35,56 @@ internal class ConcatenatedList<T>(
  * Concatenates two delta streams. Because [combine] re-emits with the *latest* value of every
  * source whenever any one emits, the non-emitting source's `change` is **stale** and must not be
  * re-applied. We therefore identify which source actually emitted (by [Delta] reference identity —
- * the `combine` transform runs sequentially, so the captured state is safe) and fold only the
+ * each collection owns its history and its `combine` transform runs sequentially) and fold only the
  * emitter's mutations, offset into the combined coordinate space. A reconstruction guard then
  * verifies the candidate mutations actually rebuild the new snapshot from the previous one,
  * falling back to [Change.Reload] on any inconsistency (e.g. conflated/soft sources).
  */
 fun <T> DeltaList<T>.concat(other: DeltaList<T>): DeltaList<T> {
-    var prevFirst: Delta<T>? = null
-    var prevSecond: Delta<T>? = null
-    var prevCombinedLoaded: List<T>? = null
+    val upstream = this
 
-    return combine(this, other) { first, second ->
-        val combinedItems = ConcatenatedList(first.items, second.items)
-        val newLoaded = combinedItems.softLoadedItems()
+    return flow {
+        var prevFirst: Delta<T>? = null
+        var prevSecond: Delta<T>? = null
+        var prevCombinedLoaded: List<T>? = null
 
-        val isFirstTick = prevFirst == null && prevSecond == null
-        val firstEmitted = first !== prevFirst
-        val secondEmitted = second !== prevSecond
-        val emitterReloaded =
-            (firstEmitted && first.change is Change.Reload) ||
-                (secondEmitted && second.change is Change.Reload)
-        val fullyLoaded = newLoaded.size == combinedItems.size
+        emitAll(
+            combine(upstream, other) { first, second ->
+                val combinedItems = ConcatenatedList(first.items, second.items)
+                val newLoaded = combinedItems.softLoadedItems()
 
-        val change: Change = if (isFirstTick || emitterReloaded || !fullyLoaded) {
-            Change.Reload
-        } else {
-            val ops = mutableListOf<Mutation>()
-            (first.change as? Change.Mutations)?.takeIf { firstEmitted }?.let { ops += it.operations }
-            (second.change as? Change.Mutations)?.takeIf { secondEmitted }
-                ?.let { ms -> ops += ms.operations.map { it.offsetBy(first.items.size) } }
+                val isFirstTick = prevFirst == null && prevSecond == null
+                val firstEmitted = first !== prevFirst
+                val secondEmitted = second !== prevSecond
+                val emitterReloaded =
+                    (firstEmitted && first.change is Change.Reload) ||
+                        (secondEmitted && second.change is Change.Reload)
+                val fullyLoaded = newLoaded.size == combinedItems.size
 
-            val prev = prevCombinedLoaded
-            if (ops.isEmpty() || prev == null) {
-                Change.Reload
-            } else {
-                val rebuilt = runCatching { applyChange(prev, Change.Mutations(ops), newLoaded) }.getOrNull()
-                if (rebuilt == newLoaded) Change.Mutations(ops) else Change.Reload
+                val change: Change = if (isFirstTick || emitterReloaded || !fullyLoaded) {
+                    Change.Reload
+                } else {
+                    val ops = mutableListOf<Mutation>()
+                    (first.change as? Change.Mutations)?.takeIf { firstEmitted }?.let { ops += it.operations }
+                    (second.change as? Change.Mutations)?.takeIf { secondEmitted }
+                        ?.let { ms -> ops += ms.operations.map { it.offsetBy(first.items.size) } }
+
+                    val prev = prevCombinedLoaded
+                    if (ops.isEmpty() || prev == null) {
+                        Change.Reload
+                    } else {
+                        val rebuilt = runCatching { applyChange(prev, Change.Mutations(ops), newLoaded) }.getOrNull()
+                        if (rebuilt == newLoaded) Change.Mutations(ops) else Change.Reload
+                    }
+                }
+
+                prevFirst = first
+                prevSecond = second
+                prevCombinedLoaded = newLoaded
+
+                Delta(combinedItems, change)
             }
-        }
-
-        prevFirst = first
-        prevSecond = second
-        prevCombinedLoaded = newLoaded
-
-        Delta(combinedItems, change)
+        )
     }
 }
 
