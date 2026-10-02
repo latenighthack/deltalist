@@ -4,6 +4,8 @@ import com.latenighthack.deltalist.AbstractSoftList
 import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
 import com.latenighthack.deltalist.DeltaList
+import com.latenighthack.deltalist.ItemLease
+import com.latenighthack.deltalist.LeasedLazyList
 import com.latenighthack.deltalist.LazyList
 import com.latenighthack.deltalist.Mutation
 import com.latenighthack.deltalist.SoftList
@@ -42,9 +44,14 @@ import kotlin.concurrent.atomics.ExperimentalAtomicApi
 fun <T, R> DeltaList<T>.lazyMap(transform: (T) -> R): DeltaList<R> = flow {
     val state = LazyMapState(transform)
 
-    collect { delta ->
-        state.applyDelta(delta)
-        emit(Delta(state.asList(), delta.change))
+    try {
+        collect { delta ->
+            state.applyDelta(delta)
+            emit(Delta(state.asList(), delta.change))
+        }
+    } catch (error: Throwable) {
+        state.close()
+        throw error
     }
 }
 
@@ -100,7 +107,7 @@ internal class LazyMapState<S, T>(
      * Entries are evicted only when [refCount] reaches zero, so two bindings on the same
      * index (e.g. a sticky header and a row) no longer evict each other's value.
      */
-    private data class CacheEntry<T>(val value: T, val refCount: Int)
+    private data class CacheEntry<T>(val value: T, val refCount: Int, val token: Any = Any())
 
     /**
      * Immutable snapshot of the current state.
@@ -189,36 +196,35 @@ internal class LazyMapState<S, T>(
     }
 
     private fun applyMoveToCache(cache: Map<Int, CacheEntry<T>>, mutation: Mutation.Move): Map<Int, CacheEntry<T>> {
-        val fromIndex = mutation.fromIndex
-        val toIndex = mutation.toIndex
-
-        if (fromIndex == toIndex) return cache
-
-        val movedValue = cache[fromIndex]
         val result = mutableMapOf<Int, CacheEntry<T>>()
-
-        for ((index, value) in cache) {
-            if (index == fromIndex) continue // Handle separately
-
-            val newIndex = if (fromIndex < toIndex) {
-                when {
-                    index > fromIndex && index <= toIndex -> index - 1
-                    else -> index
-                }
+        for ((index, entry) in cache) {
+            val destination = if (index in mutation.fromIndex until mutation.fromIndex + mutation.count) {
+                mutation.toIndex + index - mutation.fromIndex
             } else {
-                when {
-                    index >= toIndex && index < fromIndex -> index + 1
-                    else -> index
-                }
+                val removed = if (index >= mutation.fromIndex + mutation.count) index - mutation.count else index
+                if (removed >= mutation.toIndex) removed + mutation.count else removed
             }
-            result[newIndex] = value
+            result[destination] = entry
         }
-
-        if (movedValue != null) {
-            result[toIndex] = movedValue
-        }
-
         return result
+    }
+
+    fun close() {
+        while (true) {
+            val current = snapshot.load()
+            val closed = current.copy(cache = emptyMap(), epoch = current.epoch + 1)
+            if (snapshot.compareAndExchange(current, closed) === current) return
+        }
+    }
+
+    private fun releaseToken(token: Any) {
+        while (true) {
+            val current = snapshot.load()
+            val entry = current.cache.entries.firstOrNull { it.value.token === token } ?: return
+            val remaining = if (entry.value.refCount == 1) current.cache - entry.key
+                else current.cache + (entry.key to entry.value.copy(refCount = entry.value.refCount - 1))
+            if (snapshot.compareAndExchange(current, current.copy(cache = remaining)) === current) return
+        }
     }
 
     /**
@@ -243,7 +249,7 @@ internal class LazyMapState<S, T>(
         override val size: Int,
         private val sourceAtCreation: SoftList<S>,
         private val creationEpoch: Int
-    ) : AbstractSoftList<T>(), LazyList<T> {
+    ) : AbstractSoftList<T>(), LeasedLazyList<T> {
 
         override fun acquire(index: Int): SoftValue<T> {
             // Bounds are validated against the per-Delta snapshot this list was created
@@ -277,6 +283,21 @@ internal class LazyMapState<S, T>(
                     return SoftValue.Present(result)
                 }
                 // CAS failed - state changed (delta applied or concurrent acquire); retry.
+            }
+        }
+
+        override fun acquireItem(index: Int): ItemLease<T>? {
+            if (index !in 0 until size) return null
+            val sourceValue = sourceAtCreation.softGet(index) as? SoftValue.Present ?: return null
+            while (true) {
+                val current = snapshot.load()
+                if (current.epoch != creationEpoch) return null
+                val existing = current.cache[index]
+                val entry = existing?.copy(refCount = existing.refCount + 1)
+                    ?: CacheEntry(transform(sourceValue.value), 1)
+                if (snapshot.compareAndExchange(current, current.copy(cache = current.cache + (index to entry))) === current) {
+                    return ItemLease(entry.value) { releaseToken(entry.token) }
+                }
             }
         }
 

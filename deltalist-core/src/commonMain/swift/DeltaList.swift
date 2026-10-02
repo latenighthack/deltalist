@@ -144,7 +144,18 @@ public final class DeltaList<T: AnyObject>: ObservableObject {
     /// Retained so the soft-list accessors can query the live backing without re-bridging.
     private var currentDelta: AnyObject?
 
-    public init() {}
+    private let materializesItems: Bool
+    @Published public private(set) var revision: UInt = 0
+
+    public init() { self.materializesItems = true }
+
+    /// Internal viewport store: keep the snapshot, not an array of all generated children.
+    init(materializesItems: Bool) { self.materializesItems = materializesItems }
+
+    public func acquireItem(at index: Int) -> DeltaItemLease<T>? {
+        guard let delta = currentDelta else { return nil }
+        return acquireDeltaItem(delta, index: index)
+    }
 
     /// Collects a Kotlin `Flow<Delta<T>>` (a SKIE `AsyncSequence`) until the surrounding task is
     /// cancelled. Drive it from `.task { await list.collect(flow) }`.
@@ -155,7 +166,7 @@ public final class DeltaList<T: AnyObject>: ObservableObject {
                 applyValue(value as AnyObject)
             }
         } catch {
-            onError?(error)
+            if !Task.isCancelled && !(error is CancellationError) { onError?(error) }
         }
     }
 
@@ -209,17 +220,17 @@ public final class DeltaList<T: AnyObject>: ObservableObject {
         // class never satisfies — all miss).
         if let typed = value as? Delta<T> {
             publish(delta: typed,
-                    items: typed.loadedItems().compactMap { $0 as? T },
+                    items: materializesItems ? typed.loadedItems().compactMap { $0 as? T } : [],
                     total: Int(typed.totalSize()),
                     isReload: typed.change is Change.Reload)
         } else if let erased = value as? Delta<AnyObject> {
             publish(delta: erased,
-                    items: erased.loadedItems().compactMap { $0 as? T },
+                    items: materializesItems ? erased.loadedItems().compactMap { $0 as? T } : [],
                     total: Int(erased.totalSize()),
                     isReload: erased.change is Change.Reload)
         } else {
             publish(delta: value,
-                    items: loadedItemsViaRuntime(value).compactMap { $0 as? T },
+                    items: materializesItems ? loadedItemsViaRuntime(value).compactMap { $0 as? T } : [],
                     total: totalSizeViaRuntime(value),
                     isReload: changeViaRuntime(value) is Change.Reload)
         }
@@ -227,6 +238,7 @@ public final class DeltaList<T: AnyObject>: ObservableObject {
 
     private func publish(delta: AnyObject, items: [T], total: Int, isReload: Bool) {
         currentDelta = delta
+        revision &+= 1
         if isReload {
             animatesChanges = false
             loadedItems = items
@@ -293,7 +305,7 @@ public final class SectionedDeltaList<H: AnyObject, T: AnyObject>: ObservableObj
                 apply(value as AnyObject)
             }
         } catch {
-            onError?(error)
+            if !Task.isCancelled && !(error is CancellationError) { onError?(error) }
         }
     }
 
@@ -387,42 +399,42 @@ public final class SectionedDeltaList<H: AnyObject, T: AnyObject>: ObservableObj
 // are exported as Obj-C instance methods (a `Delta (Extensions)` category), so they can be invoked
 // directly by selector without ever bridging `delta.items`. Mirrors the sectioned helpers below.
 
-private func loadedItemsViaRuntime(_ obj: AnyObject) -> [Any] {
+func loadedItemsViaRuntime(_ obj: AnyObject) -> [Any] {
     typealias Fn = @convention(c) (AnyObject, Selector) -> NSArray?
     let sel = DeltaSelector.loadedItems
     guard let imp = DeltaIMPCache.shared.imp(for: obj, sel) else { return [] }
     return (unsafeBitCast(imp, to: Fn.self)(obj, sel) as? [Any]) ?? []
 }
 
-private func totalSizeViaRuntime(_ obj: AnyObject) -> Int {
+func totalSizeViaRuntime(_ obj: AnyObject) -> Int {
     typealias Fn = @convention(c) (AnyObject, Selector) -> Int32
     let sel = DeltaSelector.totalSize
     guard let imp = DeltaIMPCache.shared.imp(for: obj, sel) else { return 0 }
     return Int(unsafeBitCast(imp, to: Fn.self)(obj, sel))
 }
 
-private func changeViaRuntime(_ obj: AnyObject) -> AnyObject? {
+func changeViaRuntime(_ obj: AnyObject) -> AnyObject? {
     typealias Fn = @convention(c) (AnyObject, Selector) -> AnyObject?
     let sel = DeltaSelector.change
     guard let imp = DeltaIMPCache.shared.imp(for: obj, sel) else { return nil }
     return unsafeBitCast(imp, to: Fn.self)(obj, sel)
 }
 
-private func isLoadedAtViaRuntime(_ obj: AnyObject, index: Int32) -> Bool {
+func isLoadedAtViaRuntime(_ obj: AnyObject, index: Int32) -> Bool {
     typealias Fn = @convention(c) (AnyObject, Selector, Int32) -> Bool
     let sel = DeltaSelector.isLoadedAt
     guard let imp = DeltaIMPCache.shared.imp(for: obj, sel) else { return false }
     return unsafeBitCast(imp, to: Fn.self)(obj, sel, index)
 }
 
-private func loadedItemAtViaRuntime(_ obj: AnyObject, index: Int32) -> Any? {
+func loadedItemAtViaRuntime(_ obj: AnyObject, index: Int32) -> Any? {
     typealias Fn = @convention(c) (AnyObject, Selector, Int32) -> AnyObject?
     let sel = DeltaSelector.getLoadedItemAt
     guard let imp = DeltaIMPCache.shared.imp(for: obj, sel) else { return nil }
     return unsafeBitCast(imp, to: Fn.self)(obj, sel, index)
 }
 
-private func triggerLoadAtViaRuntime(_ obj: AnyObject, index: Int32) {
+func triggerLoadAtViaRuntime(_ obj: AnyObject, index: Int32) {
     typealias Fn = @convention(c) (AnyObject, Selector, Int32) -> Void
     let sel = DeltaSelector.triggerLoadAt
     guard let imp = DeltaIMPCache.shared.imp(for: obj, sel) else { return }

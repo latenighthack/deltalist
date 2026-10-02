@@ -2,10 +2,11 @@ package com.latenighthack.deltalist
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.FlowCollector
-import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
- * A mutable state holder for sectioned delta emissions.
+ * A conflated mutable holder. Each collector receives Reload initially and after missed
+ * publications. Consecutive changes use running coordinates. Serialize writers; callbacks
+ * are not retried. Do not conflate or replay raw deltas downstream.
  */
 interface MutableSectionedDeltaList<S, T> : Flow<SectionedDelta<S, T>> {
     val value: List<Section<S, T>>
@@ -32,7 +33,9 @@ interface MutableSectionedDeltaList<S, T> : Flow<SectionedDelta<S, T>> {
 internal class MutableSectionedDeltaListImpl<S, T>(
     initial: List<Section<S, T>>
 ) : MutableSectionedDeltaList<S, T> {
-    private val state = MutableStateFlow(SectionedDelta(initial, SectionedChange.Reload))
+    private val state = DeltaState(SectionedDelta(initial.publicationSnapshot(), SectionedChange.Reload)) {
+        SectionedDelta(it.sections, SectionedChange.Reload)
+    }
 
     override val value: List<Section<S, T>> get() = state.value.sections
 
@@ -41,13 +44,13 @@ internal class MutableSectionedDeltaListImpl<S, T>(
     override fun appendSection(header: S, items: List<T>) {
         val current = state.value.sections.toMutableList()
         val index = current.size
-        current.add(Section(header, items))
+        current.add(Section(header, items.toList()))
         state.value = SectionedDelta(current, SectionedChange.Sections(SectionMutation.Insert(index)))
     }
 
     override fun insertSection(index: Int, header: S, items: List<T>) {
         val current = state.value.sections.toMutableList()
-        current.add(index, Section(header, items))
+        current.add(index, Section(header, items.toList()))
         state.value = SectionedDelta(current, SectionedChange.Sections(SectionMutation.Insert(index)))
     }
 
@@ -138,7 +141,7 @@ internal class MutableSectionedDeltaListImpl<S, T>(
     }
 
     override fun reload(sections: List<Section<S, T>>) {
-        state.value = SectionedDelta(sections, SectionedChange.Reload)
+        state.value = SectionedDelta(sections.publicationSnapshot(), SectionedChange.Reload)
     }
 
     override suspend fun collect(collector: FlowCollector<SectionedDelta<S, T>>) {
@@ -149,3 +152,9 @@ internal class MutableSectionedDeltaListImpl<S, T>(
 fun <S, T> mutableSectionedDeltaListOf(
     initial: List<Section<S, T>> = emptyList()
 ): MutableSectionedDeltaList<S, T> = MutableSectionedDeltaListImpl(initial)
+
+// Copy ordinary lists hidden by Section's convenience constructor, preserving lazy snapshots.
+private fun <S, T> List<Section<S, T>>.publicationSnapshot(): List<Section<S, T>> = map { section ->
+    val items = section.items
+    if (items is FullSoftList<T>) section.copy(items = items.snapshot()) else section
+}

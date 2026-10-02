@@ -18,10 +18,10 @@ public final class ViewModelListBinding<Raw: AnyObject, Element> {
     public typealias Identity = @MainActor (Element) -> AnyHashable
     public typealias Observer = @MainActor (Element) async -> Void
 
-    private let startSource: @MainActor (
+    private let collectSource: @MainActor (
         @escaping @MainActor (Any) -> Void,
         @escaping @MainActor (Error) -> Void
-    ) -> Task<Void, Never>
+    ) async -> Void
     private let classifier: Classifier
     private let identity: Identity
     private let observer: Observer
@@ -47,16 +47,15 @@ public final class ViewModelListBinding<Raw: AnyObject, Element> {
         self.classifier = classify
         self.identity = identity
         self.observer = observe
-        self.startSource = { receive, fail in
-            Task { @MainActor in
-                do {
-                    for try await delta in source {
-                        if Task.isCancelled { break }
-                        receive(delta)
-                    }
-                } catch {
-                    fail(error)
+        self.collectSource = { receive, fail in
+            guard !Task.isCancelled else { return }
+            do {
+                for try await delta in source {
+                    if Task.isCancelled { break }
+                    receive(delta)
                 }
+            } catch {
+                if !Task.isCancelled && !(error is CancellationError) { fail(error) }
             }
         }
     }
@@ -94,11 +93,11 @@ public final class ViewModelListBinding<Raw: AnyObject, Element> {
 
     /// Feeds the native DeltaList SwiftUI store without exposing the raw stream to application code.
     public func collect(into list: DeltaList<Raw>) async {
-        let task = startSource(
+        guard !Task.isCancelled else { return }
+        await collectSource(
             { delta in list.apply(delta: delta) },
             { error in list.onError?(error) }
         )
-        await task.value
     }
 
     #if canImport(UIKit) && !os(watchOS)
@@ -106,10 +105,12 @@ public final class ViewModelListBinding<Raw: AnyObject, Element> {
     /// `DeltaCollectionDataSource`.
     @available(iOS 15.0, *)
     public func bind(to dataSource: DeltaCollectionDataSource<Raw>) {
-        let task = startSource(
-            { delta in dataSource.apply(delta: delta) },
-            { error in dataSource.onError?(error) }
-        )
+        let task = Task { @MainActor [collectSource, weak dataSource] in
+            await collectSource(
+                { [weak dataSource] delta in dataSource?.apply(delta: delta) },
+                { [weak dataSource] error in dataSource?.onError?(error) }
+            )
+        }
         dataSource.setBindingTask(task)
     }
     #elseif canImport(AppKit)
@@ -117,23 +118,18 @@ public final class ViewModelListBinding<Raw: AnyObject, Element> {
     /// `DeltaNSCollectionDataSource`.
     @available(macOS 12.0, *)
     public func bind(to dataSource: DeltaNSCollectionDataSource<Raw>) {
-        let task = startSource(
-            { delta in dataSource.apply(delta: delta) },
-            { error in dataSource.onError?(error) }
-        )
+        let task = Task { @MainActor [collectSource, weak dataSource] in
+            await collectSource(
+                { [weak dataSource] delta in dataSource?.apply(delta: delta) },
+                { [weak dataSource] error in dataSource?.onError?(error) }
+            )
+        }
         dataSource.setBindingTask(task)
     }
     #endif
 }
 
 // MARK: - SwiftUI
-
-@available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
-private struct ViewModelListRow<Element>: Identifiable {
-    let id: AnyHashable
-    let observationId: AnyHashable
-    let element: Element
-}
 
 /// A one-expression SwiftUI `List` backed by a fully-loaded generated ViewModel list binding.
 /// Collection and per-row state observation automatically follow the mounted view lifecycle. Use
@@ -143,7 +139,7 @@ private struct ViewModelListRow<Element>: Identifiable {
 public struct DeltaListView<Raw: AnyObject, Element, RowContent: View>: View {
     private let binding: ViewModelListBinding<Raw, Element>
     private let rowContent: (Element) -> RowContent
-    @StateObject private var list = DeltaList<Raw>()
+    @StateObject private var list = DeltaList<Raw>(materializesItems: false)
 
     public init(
         _ binding: ViewModelListBinding<Raw, Element>,
@@ -153,24 +149,11 @@ public struct DeltaListView<Raw: AnyObject, Element, RowContent: View>: View {
         self.rowContent = rowContent
     }
 
-    private var rows: [ViewModelListRow<Element>] {
-        binding.retainCachedElements(for: list.loadedItems)
-        return list.loadedItems.map { raw in
-            let element = binding.element(for: raw)
-            return ViewModelListRow(
-                id: binding.id(for: element),
-                observationId: AnyHashable(ObjectIdentifier(raw)),
-                element: element
-            )
-        }
-    }
-
     public var body: some View {
-        List(rows) { row in
-            rowContent(row.element)
-                .task(id: row.observationId) { await binding.observe(row.element) }
+        List {
+            DeltaForEachRows(binding: binding, list: list, rowContent: rowContent)
         }
-        .task { await binding.collect(into: list) }
+        .task(id: ObjectIdentifier(binding)) { await binding.collect(into: list) }
     }
 }
 
@@ -181,7 +164,8 @@ public struct DeltaListView<Raw: AnyObject, Element, RowContent: View>: View {
 public struct DeltaForEach<Raw: AnyObject, Element, RowContent: View>: View {
     private let binding: ViewModelListBinding<Raw, Element>
     private let rowContent: (Element) -> RowContent
-    @StateObject private var list = DeltaList<Raw>()
+    @StateObject private var list = DeltaList<Raw>(materializesItems: false)
+    private var suppliedList: DeltaList<Raw>? = nil
 
     public init(
         _ binding: ViewModelListBinding<Raw, Element>,
@@ -191,48 +175,145 @@ public struct DeltaForEach<Raw: AnyObject, Element, RowContent: View>: View {
         self.rowContent = rowContent
     }
 
-    private var rows: [ViewModelListRow<Element>] {
-        binding.retainCachedElements(for: list.loadedItems)
-        return list.loadedItems.map { raw in
-            let element = binding.element(for: raw)
-            return ViewModelListRow(
-                id: binding.id(for: element),
-                observationId: AnyHashable(ObjectIdentifier(raw)),
-                element: element
-            )
-        }
+    public init(
+        _ binding: ViewModelListBinding<Raw, Element>,
+        observing list: DeltaList<Raw>,
+        @ViewBuilder rowContent: @escaping (Element) -> RowContent
+    ) {
+        self.binding = binding
+        self.suppliedList = list
+        self.rowContent = rowContent
     }
 
     public var body: some View {
-        ForEach(rows) { row in
-            rowContent(row.element)
-                .task(id: row.observationId) { await binding.observe(row.element) }
-        }
-        .task { await binding.collect(into: list) }
+        DeltaForEachRows(binding: binding, list: suppliedList ?? list, rowContent: rowContent)
+            .task(id: ObjectIdentifier(binding)) {
+                if suppliedList == nil { await binding.collect(into: list) }
+            }
     }
 }
 
 @available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
-private struct ViewModelListSlot<Element>: Identifiable {
+@MainActor
+private struct DeltaForEachRows<Raw: AnyObject, Element, RowContent: View>: View {
+    let binding: ViewModelListBinding<Raw, Element>
+    @ObservedObject var list: DeltaList<Raw>
+    let rowContent: (Element) -> RowContent
+
+    var body: some View {
+        ForEach(loadedSlots(binding: binding, list: list)) { slot in
+            DeltaBoundRow(binding: binding, list: list, index: slot.index, rowContent: rowContent)
+        }
+    }
+}
+
+private struct ViewModelListSlot: Identifiable {
     let id: AnyHashable
-    let observationId: AnyHashable?
     let index: Int
-    let element: Element?
+    let loaded: Bool
 }
 
-private struct ViewModelUnloadedSlotIdentity: Hashable {
-    let index: Int
+private struct ViewModelUnloadedSlotIdentity: Hashable { let index: Int }
+private struct RowObservationIdentity: Hashable {
+    let binding: ObjectIdentifier
+    let raw: ObjectIdentifier
 }
 
-/// Soft-list SwiftUI binding. Loaded slots use generated stable identity; unloaded slots use a
-/// temporary positional identity and trigger their native DeltaList load when they appear.
+@available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
+@MainActor
+private func loadedSlots<Raw: AnyObject, Element>(
+    binding: ViewModelListBinding<Raw, Element>, list: DeltaList<Raw>, includeUnloaded: Bool = false
+) -> [ViewModelListSlot] {
+    (0..<list.totalSize).compactMap { index in
+        if let raw = list.loadedItem(at: index) {
+            // Classify for identity only. The mounted row owns the retained wrapper and lease.
+            return ViewModelListSlot(id: binding.id(for: binding.makeElement(for: raw)), index: index, loaded: true)
+        }
+        return includeUnloaded ? ViewModelListSlot(
+            id: AnyHashable(ViewModelUnloadedSlotIdentity(index: index)), index: index, loaded: false) : nil
+    }
+}
+
+@available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
+@MainActor
+private final class BoundRowState<Raw: AnyObject, Element>: ObservableObject {
+    struct Value {
+        let element: Element
+        let lease: DeltaItemLease<Raw>
+        let binding: ViewModelListBinding<Raw, Element>
+    }
+    @Published var value: Value?
+
+    func update(binding: ViewModelListBinding<Raw, Element>, list: DeltaList<Raw>, index: Int) {
+        guard let next = list.acquireItem(at: index) else { clear(); return }
+        let previous = value
+        let element: Element
+        if let previous, previous.lease.item === next.item, previous.binding === binding {
+            element = previous.element
+        } else {
+            element = binding.makeElement(for: next.item)
+        }
+        value = Value(element: element, lease: next, binding: binding)
+        previous?.lease.release()
+    }
+    func clear() {
+        let previous = value
+        value = nil
+        previous?.lease.release()
+    }
+}
+
+@available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
+@MainActor
+private struct BoundRowInput<Raw: AnyObject, Element>: Equatable {
+    let binding: ViewModelListBinding<Raw, Element>
+    let list: DeltaList<Raw>
+    let index: Int
+    let revision: UInt
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.binding === rhs.binding && lhs.list === rhs.list && lhs.index == rhs.index && lhs.revision == rhs.revision
+    }
+}
+
+@available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
+@MainActor
+private struct DeltaBoundRow<Raw: AnyObject, Element, RowContent: View>: View {
+    let binding: ViewModelListBinding<Raw, Element>
+    @ObservedObject var list: DeltaList<Raw>
+    let index: Int
+    let rowContent: (Element) -> RowContent
+    @StateObject private var state = BoundRowState<Raw, Element>()
+
+    var body: some View {
+        let input = BoundRowInput(binding: binding, list: list, index: index, revision: list.revision)
+        ZStack(alignment: .leading) {
+            if let value = state.value {
+                rowContent(value.element)
+                    .task(id: RowObservationIdentity(binding: ObjectIdentifier(value.binding), raw: ObjectIdentifier(value.lease.item))) {
+                        await value.binding.observe(value.element)
+                    }
+            } else if let raw = list.loadedItem(at: index) {
+                // A real row mounts the lifecycle before the first acquisition.
+                rowContent(binding.makeElement(for: raw))
+            }
+        }
+        .onAppear { state.update(binding: binding, list: list, index: index) }
+        .onChange(of: input) { next in
+            state.update(binding: next.binding, list: next.list, index: next.index)
+        }
+        .onDisappear { state.clear() }
+    }
+}
+
+/// A paginated SwiftUI list. Only mounted rows retain acquired children and observe their state.
 @available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
 @MainActor
 public struct DeltaLazyListView<Raw: AnyObject, Element, RowContent: View, LoadingContent: View>: View {
     private let binding: ViewModelListBinding<Raw, Element>
     private let rowContent: (Element) -> RowContent
     private let loadingContent: (Int) -> LoadingContent
-    @StateObject private var list = DeltaList<Raw>()
+    @StateObject private var list = DeltaList<Raw>(materializesItems: false)
 
     public init(
         _ binding: ViewModelListBinding<Raw, Element>,
@@ -244,38 +325,16 @@ public struct DeltaLazyListView<Raw: AnyObject, Element, RowContent: View, Loadi
         self.rowContent = rowContent
     }
 
-    private var slots: [ViewModelListSlot<Element>] {
-        binding.retainCachedElements(for: list.loadedItems)
-        return (0..<list.totalSize).map { index in
-            guard let raw = list.loadedItem(at: index) else {
-                return ViewModelListSlot(
-                    id: AnyHashable(ViewModelUnloadedSlotIdentity(index: index)),
-                    observationId: nil,
-                    index: index,
-                    element: nil
-                )
-            }
-            let element = binding.element(for: raw)
-            return ViewModelListSlot(
-                id: binding.id(for: element),
-                observationId: AnyHashable(ObjectIdentifier(raw)),
-                index: index,
-                element: element
-            )
-        }
-    }
-
     public var body: some View {
-        List(slots) { slot in
-            if let element = slot.element, let observationId = slot.observationId {
-                rowContent(element)
-                    .task(id: observationId) { await binding.observe(element) }
+        List(loadedSlots(binding: binding, list: list, includeUnloaded: true)) { slot in
+            if slot.loaded {
+                DeltaBoundRow(binding: binding, list: list, index: slot.index, rowContent: rowContent)
             } else {
                 loadingContent(slot.index)
                     .onAppear { list.triggerLoad(at: slot.index) }
             }
         }
-        .task { await binding.collect(into: list) }
+        .task(id: ObjectIdentifier(binding)) { await binding.collect(into: list) }
     }
 }
 

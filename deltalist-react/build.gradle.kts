@@ -5,7 +5,7 @@ plugins {
 
 kotlin {
     js(IR) {
-        browser()
+        browser { testTask { useKarma { useChromeHeadless() } } }
     }
 
     sourceSets {
@@ -18,6 +18,7 @@ kotlin {
         }
         jsTest.dependencies {
             implementation(kotlin("test"))
+            implementation(libs.kotlinx.coroutines.test)
         }
     }
 }

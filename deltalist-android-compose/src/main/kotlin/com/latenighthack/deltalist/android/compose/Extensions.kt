@@ -1,5 +1,6 @@
 package com.latenighthack.deltalist.android.compose
 
+import androidx.compose.runtime.RememberObserver
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -9,6 +10,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
 import com.latenighthack.deltalist.DeltaList
+import com.latenighthack.deltalist.ItemLease
+import com.latenighthack.deltalist.LeasedLazyList
 import com.latenighthack.deltalist.LazyList
 import com.latenighthack.deltalist.SoftList
 import com.latenighthack.deltalist.SoftValue
@@ -93,8 +96,7 @@ fun <T> DeltaList<T>.collectAsDeltaState(
  * }
  * ```
  *
- * Note: For most use cases, you can access items directly and rely on composition
- * lifecycle. This function is useful when you need explicit control over release timing.
+ * Use this helper for lazy items: ordinary reads do not own a composition lifecycle.
  *
  * @param index The index of the item to access
  * @param key A stable key for the item (used for DisposableEffect identity)
@@ -103,6 +105,7 @@ fun <T> DeltaList<T>.collectAsDeltaState(
 @Composable
 fun <T> SoftList<T>.rememberItem(index: Int, key: Any): T {
     val list = this
+    if (list is LeasedLazyList<T>) return rememberLease(list, index, key).item
     val item = remember(key) {
         when (val v = list.acquireOrGet(index)) {
             is SoftValue.Present -> v.value
@@ -155,6 +158,10 @@ fun <T> SoftList<T>.rememberItem(index: Int, key: Any): T {
 @Composable
 fun <T> SoftList<T>.rememberLazyItem(key: Any, index: Int) {
     val list = this
+    if (list is LeasedLazyList<T>) {
+        rememberLease(list, index, key)
+        return
+    }
     if (list is LazyList<*>) {
         @Suppress("UNCHECKED_CAST")
         val lazy = list as LazyList<T>
@@ -166,3 +173,22 @@ fun <T> SoftList<T>.rememberLazyItem(key: Any, index: Int) {
         }
     }
 }
+
+// Structural SoftList equality must not suppress acquisition handover to a new snapshot.
+private class SnapshotIdentity(val value: Any) {
+    override fun equals(other: Any?): Boolean = other is SnapshotIdentity && value === other.value
+    override fun hashCode(): Int = 0
+}
+
+private class RememberedLease<T>(val lease: ItemLease<T>) : RememberObserver {
+    override fun onRemembered() = Unit
+    override fun onForgotten() = lease.release()
+    override fun onAbandoned() = lease.release()
+}
+
+@Composable
+private fun <T> rememberLease(list: LeasedLazyList<T>, index: Int, key: Any): ItemLease<T> =
+    remember(key, SnapshotIdentity(list), index) {
+        RememberedLease(list.acquireItem(index)
+            ?: throw IndexOutOfBoundsException("Item at $index is not loaded or snapshot is obsolete"))
+    }.lease

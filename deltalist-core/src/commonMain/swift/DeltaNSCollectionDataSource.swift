@@ -37,6 +37,7 @@ public class DeltaNSCollectionDataSource<T: AnyObject>: NSObject,
     weak var collectionView: NSCollectionView?
     private(set) public var items: [T] = []
     private var task: Task<Void, Never>?
+    private var rowLeases: [ObjectIdentifier: DeltaItemLease<T>] = [:]
     private var hasReceivedInitialData = false
 
     // Soft list support - store the current delta for pagination methods
@@ -96,7 +97,7 @@ public class DeltaNSCollectionDataSource<T: AnyObject>: NSObject,
                 }
             } catch {
                 // Surface the failure if a handler is set; otherwise complete silently.
-                self?.onError?(error)
+                if !Task.isCancelled && !(error is CancellationError) { self?.onError?(error) }
             }
         }
     }
@@ -122,7 +123,7 @@ public class DeltaNSCollectionDataSource<T: AnyObject>: NSObject,
                 }
             } catch {
                 // Surface the failure if a handler is set; otherwise complete silently.
-                self?.onError?(error)
+                if !Task.isCancelled && !(error is CancellationError) { self?.onError?(error) }
             }
         }
     }
@@ -143,10 +144,13 @@ public class DeltaNSCollectionDataSource<T: AnyObject>: NSObject,
     public func unbind() {
         task?.cancel()
         task = nil
+        rowLeases.values.forEach { $0.release() }
+        rowLeases.removeAll()
     }
 
     /// Sets the binding task for external collectors (e.g., MoveableDeltaList extensions).
     public func setBindingTask(_ newTask: Task<Void, Never>) {
+        unbind()
         task = newTask
     }
 
@@ -193,16 +197,14 @@ public class DeltaNSCollectionDataSource<T: AnyObject>: NSObject,
         // Use loadedItems() method instead
         var extractedItems: [T] = []
 
-        if let loadedArray = (delta as? DeltaProtocol)?.loadedItems() as? [AnyObject] {
-            extractedItems = loadedArray.compactMap { $0 as? T }
-        }
+        extractedItems = loadedItemsViaRuntime(delta).compactMap { $0 as? T }
 
         items = extractedItems
 
         if let deltaProto = delta as? DeltaProtocol {
             totalSize = Int(deltaProto.totalSize())
         } else {
-            totalSize = items.count
+            totalSize = totalSizeViaRuntime(delta)
         }
 
         onItemsChanged?(items)
@@ -331,7 +333,8 @@ public class DeltaNSCollectionDataSource<T: AnyObject>: NSObject,
         if let deltaProto = currentDelta as? DeltaProtocol {
             return deltaProto.isLoadedAt(index: Int32(index))
         }
-        return index < items.count
+        if let delta = currentDelta { return isLoadedAtViaRuntime(delta, index: Int32(index)) }
+        return index >= 0 && index < items.count
     }
 
     /// Returns the loaded item at the given index, or nil if not loaded (for soft lists).
@@ -345,7 +348,8 @@ public class DeltaNSCollectionDataSource<T: AnyObject>: NSObject,
         if let deltaProto = currentDelta as? DeltaProtocol {
             return deltaProto.getLoadedItemAt(index: Int32(index)) as? T
         }
-        return index < items.count ? items[index] : nil
+        if let delta = currentDelta { return loadedItemAtViaRuntime(delta, index: Int32(index)) as? T }
+        return index >= 0 && index < items.count ? items[index] : nil
     }
 
     /// Triggers loading at the given index (for soft lists).
@@ -362,6 +366,7 @@ public class DeltaNSCollectionDataSource<T: AnyObject>: NSObject,
             deltaProto.triggerLoadAt(index: Int32(index))
             return
         }
+        if let delta = currentDelta { triggerLoadAtViaRuntime(delta, index: Int32(index)) }
     }
 
     /// Triggers loading for all visible items that are not yet loaded.
@@ -402,7 +407,11 @@ public class DeltaNSCollectionDataSource<T: AnyObject>: NSObject,
     public func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
         let index = indexPath.item
 
-        if let item = getLoadedItemAt(index: index) {
+        if let delta = currentDelta, let lease: DeltaItemLease<T> = acquireDeltaItem(delta, index: index) {
+            let rendered = itemProvider(collectionView, indexPath, lease.item)
+            rowLeases.updateValue(lease, forKey: ObjectIdentifier(rendered))?.release()
+            return rendered
+        } else if let item = getLoadedItemAt(index: index) {
             return itemProvider(collectionView, indexPath, item)
         } else if let loadingProvider = loadingItemProvider {
             return loadingProvider(collectionView, indexPath)
@@ -430,7 +439,7 @@ public class DeltaNSCollectionDataSource<T: AnyObject>: NSObject,
     }
 
     public func collectionView(_ collectionView: NSCollectionView, didEndDisplaying item: NSCollectionViewItem, forRepresentedObjectAt indexPath: IndexPath) {
-        // Subclasses can override to handle lazy item release
+        rowLeases.removeValue(forKey: ObjectIdentifier(item))?.release()
     }
 
     /// AppKit reports selection as a set (UIKit reports a single index path), so each selected

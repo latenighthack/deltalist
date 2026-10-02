@@ -1,7 +1,6 @@
 package com.latenighthack.deltalist
 
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -71,9 +70,9 @@ internal class PaginatedDeltaListImpl<T, U>(
     private var _isLoadingAfter = false
     private var _initialLoadDone = false
 
-    private val state = MutableStateFlow<Delta<T>>(
-        Delta(createWrapper(), Change.Reload)
-    )
+    private val state = DeltaState(Delta(createWrapper(), Change.Reload)) {
+        Delta(it.items, Change.Reload)
+    }
 
     // Bumped per emitted snapshot. The fetch-trigger closures below capture the generation
     // they were created in and no-op once superseded, so a stale snapshot's request() can't

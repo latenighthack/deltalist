@@ -2,8 +2,13 @@ package com.latenighthack.deltalist
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.FlowCollector
-import kotlinx.coroutines.flow.MutableStateFlow
 
+/**
+ * A conflated snapshot holder. Each collector starts with Reload and reloads after missed
+ * publications; consecutive publications retain their running-coordinate mutations.
+ * Serialize writers. Mutation callbacks run once and are never retried.
+ * Do not conflate or replay the resulting delta stream without normalizing it again.
+ */
 interface MutableDeltaList<T> : Flow<Delta<T>> {
     val value: List<T>
 
@@ -24,7 +29,9 @@ interface MutableDeltaList<T> : Flow<Delta<T>> {
 internal class MutableDeltaListImpl<T>(
     initial: List<T>
 ) : MutableDeltaList<T> {
-    private val state = MutableStateFlow(Delta(initial.asSoftList(), Change.Reload))
+    private val state = DeltaState(Delta(initial.toList().asSoftList(), Change.Reload)) {
+        Delta(it.items, Change.Reload)
+    }
 
     override val value: List<T> get() = state.value.items.softLoadedItems()
 
@@ -41,7 +48,7 @@ internal class MutableDeltaListImpl<T>(
     }
 
     override fun reload(items: List<T>) {
-        state.value = Delta(items.asSoftList(), Change.Reload)
+        state.value = Delta(items.toList().asSoftList(), Change.Reload)
     }
 
     override fun append(item: T) = update { it.add(item) }

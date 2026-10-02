@@ -5,6 +5,7 @@ plugins {
 }
 
 android {
+    testOptions { unitTests.isIncludeAndroidResources = true }
     namespace = "com.latenighthack.deltalist.android.recyclerview"
     compileSdk = 34
 
@@ -26,6 +27,9 @@ kotlin {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation(libs.kotlinx.coroutines.test)
     api(project(":deltalist-core"))
 
     implementation(libs.kotlinx.coroutines.android)

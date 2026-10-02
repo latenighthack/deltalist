@@ -194,3 +194,93 @@ const items = useDeltaList(viewModel.items)
 `visibleRange` acquires loaded lazy values, releases values outside the new range, and requests
 unloaded positions. `revision` changes after every delta for virtualizers that cache rendered rows;
 the proxy itself intentionally remains referentially stable.
+
+### Delivery and ownership contracts
+
+Mutable flat/sectioned holders and paginated sources deliver a `Reload` to each new
+collector. Consecutive publications retain their mutations; a collector that misses
+publications receives a reload of the latest snapshot. Producers remain bounded
+and conflated. Serialize imperative writes; update callbacks execute once. Do not
+apply `conflate`, dropping buffers, or `stateIn` to raw mutation deltas and assume
+that their coordinates still describe each subscriber's preceding emission. For
+shared immutable ordinary snapshots, apply `asDeltaList { it.key }` after the shared
+snapshot flow so each subscriber computes its own history.
+
+`lazyMap` supports both positional `LazyList` operations and owned `ItemLease`
+handles. A lease pins one item until `release()`; release is idempotent and follows
+the acquired cache entry through moves. A release after removal or reload cannot
+evict a replacement at the same index. Acquire the successor before releasing a
+previous lease when handing a mounted row to a newer snapshot.
+
+`concat`, `concatSections`, `header`, `footer`, `flattenItems`, mapped `flatten`,
+and `withStableIds` preserve acquisition/release. Thus `lazyMap → ifEmpty →
+composition` is supported. Pure `softGet` may evaluate a mapper, but never pins a
+value or requests a page. Superseded snapshots remain readable; their lifecycle
+and load-request side effects are disabled. Previously acquired leases can still
+be released. Normal completion of a finite source leaves its final snapshot usable.
+Custom `LazyList` implementations can adopt `LeasedLazyList` for durable handles;
+legacy implementations retain positional release behavior.
+
+Platform bindings own their leases. Compose callers should use `rememberItem`
+or `rememberLazyItemState`; plain reads do not install disposal hooks. Swift's
+`DeltaList.acquireItem(at:)` exposes an owned handle for custom native renderers.
+Generated SwiftUI rows and native collection-view bindings handle pinning during
+row/cell lifetime. The lazy SwiftUI view retains slot metadata and mounted wrappers,
+not an array of every generated child. Nominal keys remain the row identity;
+observation follows the acquired raw object's identity.
+
+Caching is not durable domain ownership: retain children by nominal key upstream
+when drafts or selection must survive filtering, reloads, or leaving the viewport.
+
+### Empty SwiftUI containers
+
+For an embeddable `DeltaForEach` inside `Form` or `List`, let the mounted container
+own collection. The `observing:` initializer only renders and observes rows, so an
+empty list does not need an existing row to start its source:
+
+```swift
+@StateObject private var list = DeltaList<ItemViewModel>()
+
+var body: some View {
+    Form {
+        DeltaForEach(model.items, observing: list) { ItemRow(model: $0) }
+    }
+    .task(id: ObjectIdentifier(model.items)) {
+        await model.items.collect(into: list)
+    }
+}
+```
+
+Keep the binding instance stable until its source changes. `DeltaListView` and
+`DeltaLazyListView` own concrete `List` containers and manage collection themselves.
+The original self-collecting `DeltaForEach` initializer remains available for
+compatible custom containers; use `observing:` in row-resolving containers.
+
+### Partial grouping
+
+Both `groupBy` overloads group only the **contiguous loaded prefix**. Given
+`[Present(A), NotLoaded, Present(B)]`, only `A` participates. Group counts and mapped
+headers describe that partial projection. Filling the gap includes the newly
+contiguous values; grouping never requests the missing page. The `flatten` footer
+mapper likewise receives the section's loaded prefix.
+
+Use fully loaded collections for authoritative groups/counts. Group domain data
+before constructing expensive row objects, then lazily map each section's row flow
+before composing it with headers or other sections.
+
+### Native lifecycle tests
+
+`apple-tests` hosts the shipped Swift runtime on iOS and macOS and consumes a
+separately exported Kotlin demo fixture. Tests cover cancellation, empty containers,
+row observation, pinning, and the cross-framework acquisition ABI. Xcode and
+[XcodeGen](https://github.com/yonaskolb/XcodeGen) are required; generated projects
+and results stay under the ignored `apple-tests/build` directory.
+
+```sh
+apple-tests/run-tests.sh macos
+DELTALIST_IOS_DESTINATION='platform=iOS Simulator,id=<UDID>' apple-tests/run-tests.sh ios
+```
+
+Validation uses project dependencies and local framework outputs. It does not
+publish artifacts, alter Maven Local, or release applications. Never replace the
+published bytes of an existing version; use a new version for any later release.

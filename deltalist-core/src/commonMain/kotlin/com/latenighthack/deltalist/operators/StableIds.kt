@@ -4,6 +4,10 @@ import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
 import com.latenighthack.deltalist.DeltaList
 import com.latenighthack.deltalist.AbstractSoftList
+import com.latenighthack.deltalist.ItemLease
+import com.latenighthack.deltalist.LeasedLazyList
+import com.latenighthack.deltalist.acquireItemOrGet
+import com.latenighthack.deltalist.mapItem
 import com.latenighthack.deltalist.LazyList
 import com.latenighthack.deltalist.Mutation
 import com.latenighthack.deltalist.SoftList
@@ -83,14 +87,21 @@ internal class StableItemList<T>(
  */
 internal class StableItemLazyList<T>(
     private val source: LazyList<T>,
-    private val idMapping: List<Int>
-) : AbstractSoftList<StableItem<T>>(), LazyList<StableItem<T>> {
+    private val idMapping: List<Int>,
+    private val isCurrent: () -> Boolean
+) : AbstractSoftList<StableItem<T>>(), LeasedLazyList<StableItem<T>> {
     override val size: Int get() = idMapping.size
 
+    override fun acquireItem(index: Int): ItemLease<StableItem<T>>? =
+        if (!isCurrent() || index !in idMapping.indices) null
+        else source.acquireItemOrGet(index)?.mapItem { StableItemImpl(idMapping[index], it) }
+
     override fun acquire(index: Int): SoftValue<StableItem<T>> {
+        if (index !in idMapping.indices) return SoftValue.NotLoaded()
+        if (!isCurrent()) return softGet(index) ?: SoftValue.NotLoaded()
         return when (val s = source.acquire(index)) {
             is SoftValue.Present -> SoftValue.Present(StableItemImpl(idMapping[index], s.value))
-            is SoftValue.NotLoaded -> s
+            is SoftValue.NotLoaded -> SoftValue.NotLoaded { if (isCurrent()) s.request() }
         }
     }
 
@@ -98,21 +109,21 @@ internal class StableItemLazyList<T>(
         if (index < 0 || index >= size) return null
         return when (val s = source.softGet(index)) {
             is SoftValue.Present -> SoftValue.Present(StableItemImpl(idMapping[index], s.value))
-            is SoftValue.NotLoaded -> s
+            is SoftValue.NotLoaded -> SoftValue.NotLoaded { if (isCurrent()) s.request() }
             null -> null
         }
     }
 
     override fun release(index: Int) {
-        source.release(index)
+        if (isCurrent()) source.release(index)
     }
 
     override fun releaseAll() {
-        source.releaseAll()
+        if (isCurrent()) source.releaseAll()
     }
 
     override fun isAcquired(index: Int): Boolean {
-        return source.isAcquired(index)
+        return isCurrent() && source.isAcquired(index)
     }
 }
 
@@ -126,6 +137,7 @@ internal class StableItemLazyList<T>(
  * Automatically detects if the source is a [LazyList] and preserves lazy semantics.
  */
 internal class StableIdAdapter<T> {
+    private val lifetime = CompositionLifetime()
     // Session-unique, monotonically increasing ids (kept stable across reloads so the
     // platform bindings never reuse a key for a different item). Stays Int because the
     // iOS binding keys NSDiffableDataSource on Int32; overflow needs ~2.1B inserts in a
@@ -135,6 +147,7 @@ internal class StableIdAdapter<T> {
     private var idMapping = mutableListOf<Int>()
 
     fun applyDelta(delta: Delta<T>): Delta<StableItem<T>> {
+        val isCurrent = lifetime.next()
         val newSize = delta.items.size
         val change = delta.change
 
@@ -164,7 +177,7 @@ internal class StableIdAdapter<T> {
         val items = delta.items
         val wrappedList: SoftList<StableItem<T>> = if (items is LazyList<*>) {
             @Suppress("UNCHECKED_CAST")
-            StableItemLazyList(items as LazyList<T>, idMapping.toList())
+            StableItemLazyList(items as LazyList<T>, idMapping.toList(), isCurrent)
         } else {
             StableItemList(items, idMapping.toList())
         }

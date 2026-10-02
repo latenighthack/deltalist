@@ -6,6 +6,9 @@ import androidx.recyclerview.widget.RecyclerView
 import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
 import com.latenighthack.deltalist.DeltaList
+import com.latenighthack.deltalist.ItemLease
+import com.latenighthack.deltalist.LeasedLazyList
+import com.latenighthack.deltalist.acquireItemOrGet
 import com.latenighthack.deltalist.LazyList
 import com.latenighthack.deltalist.Mutation
 import com.latenighthack.deltalist.SoftList
@@ -79,6 +82,52 @@ abstract class DeltaAdapter<T, VH : RecyclerView.ViewHolder>(
         private set
 
     private var job: Job? = null
+    private var bindingToken: Any? = null
+    private data class HeldItem<T>(val index: Int, val lease: ItemLease<T>)
+    private val heldItems = mutableMapOf<VH, HeldItem<T>>()
+    private val pendingItems = mutableMapOf<Int, ItemLease<T>>()
+
+    private fun releaseOwnedItems() {
+        heldItems.values.forEach { it.lease.release() }
+        pendingItems.values.forEach { it.release() }
+        heldItems.clear()
+        pendingItems.clear()
+    }
+
+    private fun nextPosition(index: Int, change: Change): Int? {
+        var position = index
+        if (change is Change.Mutations) for (op in change.operations) {
+            when (op) {
+                is Mutation.Insert -> if (position >= op.index) position += op.count
+                is Mutation.Remove -> when {
+                    position in op.index until op.index + op.count -> return null
+                    position >= op.index + op.count -> position -= op.count
+                }
+                is Mutation.Update -> Unit
+                is Mutation.Move -> position = if (position in op.fromIndex until op.fromIndex + op.count) {
+                    op.toIndex + position - op.fromIndex
+                } else {
+                    val removed = if (position >= op.fromIndex + op.count) position - op.count else position
+                    if (removed >= op.toIndex) removed + op.count else removed
+                }
+            }
+        }
+        return position.takeIf { it in 0 until items.size }
+    }
+
+    private fun handoverItems(change: Change) {
+        val holders = heldItems.mapNotNull { (holder, old) ->
+            nextPosition(old.index, change)?.let { index ->
+                items.acquireItemOrGet(index)?.let { holder to HeldItem(index, it) }
+            }
+        }.toMap()
+        val pending = pendingItems.keys.mapNotNull { old ->
+            nextPosition(old, change)?.let { index -> items.acquireItemOrGet(index)?.let { index to it } }
+        }.toMap()
+        releaseOwnedItems()
+        heldItems.putAll(holders)
+        pendingItems.putAll(pending)
+    }
     private var stableIdMode: StableIdMode = StableIdMode.Unknown
 
     private enum class StableIdMode {
@@ -95,9 +144,12 @@ abstract class DeltaAdapter<T, VH : RecyclerView.ViewHolder>(
      * before delta collection starts. Always call super.bind(owner).
      */
     open fun bind(owner: LifecycleOwner) {
-        job?.cancel()
+        unbind()
+        val token = Any()
+        bindingToken = token
         job = owner.lifecycleScope.launch {
-            deltaList.collect { delta -> applyDelta(delta) }
+            try { deltaList.collect { delta -> applyDelta(delta) } }
+            finally { if (bindingToken === token) releaseOwnedItems() }
         }
     }
 
@@ -108,13 +160,14 @@ abstract class DeltaAdapter<T, VH : RecyclerView.ViewHolder>(
     fun unbind() {
         job?.cancel()
         job = null
-        // Release all lazy items when unbinding
-        items.releaseAllIfLazy()
+        bindingToken = null
+        releaseOwnedItems()
     }
 
     private fun applyDelta(delta: Delta<T>) {
         val previousCount = items.size
         items = delta.items
+        handoverItems(delta.change)
 
         // Auto-detect stable ID mode on first non-empty delta
         val firstLoaded = (items.softGet(0) as? SoftValue.Present)?.value
@@ -210,9 +263,29 @@ abstract class DeltaAdapter<T, VH : RecyclerView.ViewHolder>(
      * with [softGetItem] and call [SoftValue.NotLoaded.request] on the placeholder (typically when
      * binding a loading view holder).
      */
-    fun getItem(position: Int): T = when (val v = items.acquireOrGet(position)) {
-        is SoftValue.Present -> v.value
-        is SoftValue.NotLoaded -> throw IndexOutOfBoundsException("Item at $position is not loaded")
+    fun getItem(position: Int): T {
+        heldItems.values.firstOrNull { it.index == position }?.let { return it.lease.item }
+        return pendingItems.getOrPut(position) {
+            items.acquireItemOrGet(position)
+                ?: throw IndexOutOfBoundsException("Item at $position is not loaded")
+        }.item
+    }
+
+    override fun onBindViewHolder(holder: VH, position: Int, payloads: MutableList<Any>) {
+        val next = pendingItems.remove(position) ?: items.acquireItemOrGet(position)
+        val previous = heldItems.remove(holder)
+        if (next != null) heldItems[holder] = HeldItem(position, next)
+        try { onBindViewHolder(holder, position) }
+        finally { previous?.lease?.release() }
+    }
+
+    override fun onViewAttachedToWindow(holder: VH) {
+        super.onViewAttachedToWindow(holder)
+        val position = holder.bindingAdapterPosition
+        if (heldItems[holder]?.index == position) return
+        val next = pendingItems.remove(position) ?: items.acquireItemOrGet(position)
+        heldItems.remove(holder)?.lease?.release()
+        if (next != null) heldItems[holder] = HeldItem(position, next)
     }
 
     /**
@@ -255,10 +328,7 @@ abstract class DeltaAdapter<T, VH : RecyclerView.ViewHolder>(
      */
     override fun onViewDetachedFromWindow(holder: VH) {
         super.onViewDetachedFromWindow(holder)
-        val position = holder.bindingAdapterPosition
-        if (position != RecyclerView.NO_POSITION) {
-            items.releaseIfLazy(position)
-        }
+        heldItems.remove(holder)?.lease?.release()
     }
 
     /**
@@ -269,9 +339,6 @@ abstract class DeltaAdapter<T, VH : RecyclerView.ViewHolder>(
      */
     override fun onViewRecycled(holder: VH) {
         super.onViewRecycled(holder)
-        val position = holder.bindingAdapterPosition
-        if (position != RecyclerView.NO_POSITION) {
-            items.releaseIfLazy(position)
-        }
+        heldItems.remove(holder)?.lease?.release()
     }
 }

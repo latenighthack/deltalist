@@ -105,6 +105,7 @@ abstract class AbstractSoftList<out T> : SoftList<T> {
  * soft world costs nothing and never surfaces [SoftValue.NotLoaded].
  */
 internal class FullSoftList<T>(private val backing: List<T>) : AbstractSoftList<T>() {
+    internal fun snapshot(): SoftList<T> = FullSoftList(backing.toList())
     override val size: Int get() = backing.size
     override fun softGet(index: Int): SoftValue<T>? =
         if (index in backing.indices) SoftValue.Present(backing[index]) else null
@@ -132,7 +133,7 @@ fun <T> SoftList<T>.softLoadedCount(): Int {
     return count
 }
 
-/** Maps over only the loaded items, returning an ordinary list. */
+/** Maps the contiguous loaded prefix, stopping at the first gap without requesting it. */
 fun <T, R> SoftList<T>.softMapLoaded(transform: (T) -> R): List<R> {
     val result = mutableListOf<R>()
     for (i in 0 until size) {
@@ -145,7 +146,7 @@ fun <T, R> SoftList<T>.softMapLoaded(transform: (T) -> R): List<R> {
     return result
 }
 
-/** Iterates over only the loaded items. */
+/** Iterates the contiguous loaded prefix, stopping at the first gap without requesting it. */
 inline fun <T> SoftList<T>.softForEachLoaded(action: (T) -> Unit) {
     for (i in 0 until size) {
         when (val soft = softGet(i)) {

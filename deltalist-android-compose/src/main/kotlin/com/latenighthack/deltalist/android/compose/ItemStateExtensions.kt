@@ -59,7 +59,7 @@ fun <T, S> rememberItemState(
 ): S {
     var state by remember(key) { mutableStateOf(initialValue) }
 
-    LaunchedEffect(key) {
+    LaunchedEffect(key, item) {
         flowAccessor(item).collectLatest { state = it }
     }
 
@@ -142,24 +142,7 @@ fun <T, S> SoftList<T>.rememberLazyItemState(
     initialValue: S,
     flowAccessor: (T) -> Flow<S>
 ): S {
-    val list = this
-    val item = remember(key) {
-        when (val v = list.acquireOrGet(index)) {
-            is SoftValue.Present -> v.value
-            is SoftValue.NotLoaded -> throw IndexOutOfBoundsException("Item at $index is not loaded")
-        }
-    }
-
-    if (list is LazyList<*>) {
-        @Suppress("UNCHECKED_CAST")
-        val lazy = list as LazyList<T>
-        // Release the item's current index, not the position captured at first composition,
-        // so a move-while-composed (same key, new index) releases the right slot.
-        val currentIndex = rememberUpdatedState(index)
-        DisposableEffect(key) {
-            onDispose { lazy.release(currentIndex.value) }
-        }
-    }
+    val item = rememberItem(index, key)
 
     return rememberItemState(item, key, initialValue, flowAccessor)
 }

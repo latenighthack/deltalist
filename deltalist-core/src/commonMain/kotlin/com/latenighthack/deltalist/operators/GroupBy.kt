@@ -6,6 +6,10 @@ import kotlinx.coroutines.flow.flow
 /**
  * Groups items into sections by a key selector.
  * The key becomes the section header.
+ * Only the contiguous loaded prefix is grouped: the first unloaded or absent position
+ * ends the projection, even if later positions are loaded. No pages are requested.
+ * Use fully loaded input for authoritative groups/counts, or treat this as a partial view.
+ * Group domain values before expensive lazy row construction.
  */
 fun <T, K> DeltaList<T>.groupBy(
     keySelector: (T) -> K
@@ -46,7 +50,9 @@ fun <T, K> DeltaList<T>.groupBy(
 }
 
 /**
- * Groups items into sections with custom section header data.
+ * Groups the contiguous loaded prefix into sections with custom section header data.
+ * [headerMapper] sees only that prefix's group, not the complete paginated collection.
+ * Stops at the first unloaded/absent position and never requests pages.
  */
 fun <T, K, S> DeltaList<T>.groupBy(
     keySelector: (T) -> K,

@@ -1,4 +1,11 @@
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 package com.latenighthack.deltalist.react
+
+import com.latenighthack.deltalist.mutableDeltaListOf
+import com.latenighthack.deltalist.operators.lazyMap
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 
 import com.latenighthack.deltalist.AbstractSoftList
 import com.latenighthack.deltalist.LazyList
@@ -10,6 +17,28 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class ReactDeltaListControllerTest {
+    @Test fun realLazyMapReleasesAcrossMoveAndReplacement() = runTest {
+        val source = mutableDeltaListOf(listOf("a", "b"))
+        val controller = ReactDeltaListController { it }
+        var latest: LazyList<*>? = null
+        val job = backgroundScope.launch {
+            source.lazyMap { Any() }.collect {
+                latest = it.items as LazyList<*>
+                controller.update(it.items)
+            }
+        }
+        runCurrent()
+        controller.proxy.visibleRange(0, 1)
+        val first = controller.proxy[0]
+        source.move(0, 1); runCurrent()
+        assertSame(first, controller.proxy[1])
+        controller.proxy.visibleRange(1, 1)
+        assertTrue(!latest!!.isAcquired(0))
+        controller.dispose()
+        assertTrue(!latest!!.isAcquired(1))
+        job.cancel()
+    }
+
     @Test
     fun proxyIsStableArrayCompatibleAndDelegatesReads() {
         val controller = ReactDeltaListController { value -> "wrapped-$value" }

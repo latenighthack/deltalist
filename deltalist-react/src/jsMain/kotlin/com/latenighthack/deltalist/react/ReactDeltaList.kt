@@ -1,6 +1,8 @@
 package com.latenighthack.deltalist.react
 
 import com.latenighthack.deltalist.Delta
+import com.latenighthack.deltalist.ItemLease
+import com.latenighthack.deltalist.acquireItemOrGet
 import com.latenighthack.deltalist.LazyList
 import com.latenighthack.deltalist.SoftList
 import com.latenighthack.deltalist.SoftValue
@@ -30,7 +32,7 @@ internal class ReactDeltaListController(
     private val transform: (Any?) -> Any?,
 ) {
     private var items: SoftList<Any?>? = null
-    private val acquired = mutableSetOf<Int>()
+    private val acquired = mutableMapOf<Int, ItemLease<Any?>>()
     private val mapped = mutableMapOf<Int, Any?>()
     private val objectKeys: dynamic = js("new WeakMap()")
     private var nextObjectKey = 1
@@ -39,7 +41,12 @@ internal class ReactDeltaListController(
     val proxy: dynamic = createProxy()
 
     fun update(next: SoftList<Any?>) {
+        // Acquire successors first, while previous leases still pin moved cache entries.
+        val replacements = acquired.keys.mapNotNull { index ->
+            next.acquireItemOrGet(index)?.let { index to it }
+        }.toMap()
         releaseAcquired()
+        acquired.putAll(replacements)
         mapped.clear()
         items = next
         revision++
@@ -67,15 +74,9 @@ internal class ReactDeltaListController(
         if (index !in 0 until snapshot.size) return js("undefined")
         if (mapped.containsKey(index)) return mapped[index]
 
-        val soft = if (snapshot is LazyList<*> && acquired.add(index)) {
-            snapshot.acquireOrGet(index)
-        } else {
-            snapshot.softGet(index)
-        }
-        if (soft !is SoftValue.Present) {
-            if (snapshot is LazyList<*>) acquired.remove(index)
-            return js("undefined")
-        }
+        val lease = acquired[index] ?: snapshot.acquireItemOrGet(index)?.also { acquired[index] = it }
+        if (lease == null) return js("undefined")
+        val soft = SoftValue.Present(lease.item)
 
         val value = transform(soft.value)
         installDefaultKey(value, soft.value)
@@ -109,10 +110,9 @@ internal class ReactDeltaListController(
         val first = start.coerceIn(0, snapshot.size - 1)
         val last = endInclusive.coerceIn(first, snapshot.size - 1)
 
-        val leaving = acquired.filter { it < first || it > last }
+        val leaving = acquired.keys.filter { it < first || it > last }
         for (index in leaving) {
-            (snapshot as? LazyList<*>)?.release(index)
-            acquired.remove(index)
+            acquired.remove(index)?.release()
         }
         mapped.keys.filter { it < first || it > last }.forEach(mapped::remove)
 
@@ -124,10 +124,7 @@ internal class ReactDeltaListController(
     }
 
     private fun releaseAcquired() {
-        val lazy = items as? LazyList<*>
-        if (lazy != null) {
-            for (index in acquired) lazy.release(index)
-        }
+        acquired.values.forEach { it.release() }
         acquired.clear()
     }
 

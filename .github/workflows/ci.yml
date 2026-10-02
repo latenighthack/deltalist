@@ -32,14 +32,17 @@ jobs:
       - name: Run common tests on JS (node)
         run: ./gradlew :deltalist-core:jsNodeTest --stacktrace
 
+      - name: Run core tests on Android variants
+        run: ./gradlew :deltalist-core:testDebugUnitTest :deltalist-core:testReleaseUnitTest --stacktrace
+
       - name: Run Android binding unit tests
         run: ./gradlew :deltalist-android-notifications:testDebugUnitTest :deltalist-android-recyclerview:testDebugUnitTest :deltalist-android-compose:testDebugUnitTest --stacktrace
 
       - name: Assemble Android library modules
         run: ./gradlew :deltalist-android-recyclerview:assembleRelease :deltalist-android-compose:assembleRelease :deltalist-android-notifications:assembleRelease --stacktrace
 
-      - name: Compile JS / React module
-        run: ./gradlew :deltalist-react:compileKotlinJs --stacktrace
+      - name: Test JS / React bindings in Chromium
+        run: ./gradlew :deltalist-react:jsBrowserTest --stacktrace
 
       - name: Upload test reports
         if: always()
@@ -67,6 +70,9 @@ jobs:
       - name: Run common tests on iOS simulator
         run: ./gradlew :deltalist-core:iosSimulatorArm64Test --stacktrace
 
+      - name: Run common tests on macOS
+        run: ./gradlew :deltalist-core:macosArm64Test --stacktrace
+
       - name: Compile macOS targets
         run: ./gradlew :deltalist-core:compileKotlinMacosArm64 :deltalist-core:compileKotlinMacosX64 --stacktrace
 
@@ -81,6 +87,29 @@ jobs:
       - name: Link demo-core macOS framework (compiles demo AppKit bundled Swift)
         run: ./gradlew :demo-core:linkDebugFrameworkMacosArm64 :demo-core:linkDebugFrameworkMacosX64 --stacktrace
 
+      - name: Install native test project generator
+        run: command -v xcodegen || brew install xcodegen
+
+      - name: Run hosted macOS lifecycle tests
+        run: apple-tests/run-tests.sh macos
+
+      - name: Select iOS test destination
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          devices = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))["devices"]
+          candidates = [d for runtime, rows in devices.items() if "iOS" in runtime for d in rows if "iPhone" in d["name"]]
+          if not candidates:
+              raise SystemExit("No available iPhone simulator for native lifecycle tests")
+          destination = "platform=iOS Simulator,id=" + candidates[-1]["udid"]
+          print(destination)
+          with open(os.environ["GITHUB_ENV"], "a") as output:
+              output.write("DELTALIST_IOS_DESTINATION=" + destination + "\n")
+          PY
+
+      - name: Run hosted iOS lifecycle tests
+        run: apple-tests/run-tests.sh ios
+
       - name: Assemble release XCFramework
         run: ./gradlew :deltalist-core:assembleDeltaListCoreReleaseXCFramework --stacktrace
 
@@ -89,5 +118,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: apple-test-reports
-          path: '**/build/reports/tests/**'
+          path: |
+            **/build/reports/tests/**
+            apple-tests/build/**/*.xcresult
           if-no-files-found: ignore

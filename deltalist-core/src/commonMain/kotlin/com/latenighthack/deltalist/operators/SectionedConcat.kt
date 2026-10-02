@@ -18,12 +18,16 @@ fun <T> concatSections(flows: List<DeltaList<T>>): DeltaList<T> {
     return flow {
         // Per-source previous emissions: under `combine`, only the source whose Delta reference
         // changed actually emitted this tick; the rest carry stale changes that must not be replayed.
+        val lifetime = CompositionLifetime()
         var prevDeltas: Array<Delta<T>>? = null
         var prevCombinedLoaded: List<T>? = null
 
         emitAll(
             combine(flows) { deltas ->
-                val combinedItems = ConcatenatedMultiList(deltas.map { it.items })
+                val sources = deltas.map { it.items }
+                val combinedItems = lifecycleList(ConcatenatedMultiList(sources), sources, lifetime.next()) {
+                    concatenatedRoute(sources, it)
+                }
                 val newLoaded = combinedItems.softLoadedItems()
 
                 val previous = prevDeltas
@@ -57,7 +61,7 @@ fun <T> concatSections(flows: List<DeltaList<T>>): DeltaList<T> {
                 prevDeltas = deltas.copyOf()
                 prevCombinedLoaded = newLoaded
                 Delta(combinedItems, change)
-            }
+            }.onCompletion { cause -> if (cause != null) lifetime.close() }
         )
     }
 }

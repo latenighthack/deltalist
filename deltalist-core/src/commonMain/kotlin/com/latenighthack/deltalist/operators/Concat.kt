@@ -13,6 +13,7 @@ import com.latenighthack.deltalist.softLoadedItems
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.flowOf
 
 /**
@@ -44,13 +45,17 @@ fun <T> DeltaList<T>.concat(other: DeltaList<T>): DeltaList<T> {
     val upstream = this
 
     return flow {
+        val lifetime = CompositionLifetime()
         var prevFirst: Delta<T>? = null
         var prevSecond: Delta<T>? = null
         var prevCombinedLoaded: List<T>? = null
 
         emitAll(
             combine(upstream, other) { first, second ->
-                val combinedItems = ConcatenatedList(first.items, second.items)
+                val sources = listOf(first.items, second.items)
+                val combinedItems = lifecycleList(ConcatenatedList(first.items, second.items), sources, lifetime.next()) {
+                    concatenatedRoute(sources, it)
+                }
                 val newLoaded = combinedItems.softLoadedItems()
 
                 val isFirstTick = prevFirst == null && prevSecond == null
@@ -83,7 +88,7 @@ fun <T> DeltaList<T>.concat(other: DeltaList<T>): DeltaList<T> {
                 prevCombinedLoaded = newLoaded
 
                 Delta(combinedItems, change)
-            }
+            }.onCompletion { cause -> if (cause != null) lifetime.close() }
         )
     }
 }

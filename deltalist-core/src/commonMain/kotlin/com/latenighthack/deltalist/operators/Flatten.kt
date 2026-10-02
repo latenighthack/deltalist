@@ -3,6 +3,7 @@ package com.latenighthack.deltalist.operators
 import com.latenighthack.deltalist.*
 import com.latenighthack.deltalist.SoftList
 import com.latenighthack.deltalist.SoftValue
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.flow
 
 /**
@@ -10,19 +11,23 @@ import kotlinx.coroutines.flow.flow
  *
  * @param header Optional mapper to create a row from section header. If null, no header rows are emitted.
  * @param item Mapper to create a row from each item.
- * @param footer Optional mapper to create a footer row from section header and items.
+ * @param footer Optional mapper receiving the header and contiguous loaded prefix of section items.
  */
 fun <S, T, R> SectionedDeltaList<S, T>.flatten(
     header: ((S) -> R)? = null,
     item: (T) -> R,
     footer: ((S, List<T>) -> R)? = null
 ): DeltaList<R> = flow {
+    val lifetime = CompositionLifetime()
     var previousSections: List<Section<S, T>> = emptyList()
 
-    collect { delta ->
+    this@flatten.onCompletion { cause -> if (cause != null) lifetime.close() }.collect { delta ->
         val newSections = delta.sections
 
-        val flattenedItems = FlattenedSectionList(newSections, header, item, footer)
+        val backing = FlattenedSectionList(newSections, header, item, footer)
+        val flattenedItems = lifecycleList(backing, newSections.map { it.items }, lifetime.next()) { index ->
+            backing.lifecycleRoute(index)
+        }
 
         // If previousSections is empty, we can't translate mutations - treat as Reload
         val change = if (previousSections.isEmpty() && delta.change !is SectionedChange.Reload) {
@@ -75,11 +80,15 @@ fun <S, T, R> SectionedDeltaList<S, T>.flatten(
  * Flattens sections into just items, no headers or footers.
  */
 fun <S, T> SectionedDeltaList<S, T>.flattenItems(): DeltaList<T> = flow {
+    val lifetime = CompositionLifetime()
     var previousSections: List<Section<S, T>> = emptyList()
 
-    collect { delta ->
+    this@flattenItems.onCompletion { cause -> if (cause != null) lifetime.close() }.collect { delta ->
         val newSections = delta.sections
-        val flattenedItems = FlattenedItemsList(newSections)
+        val sources = newSections.map { it.items }
+        val flattenedItems = lifecycleList(FlattenedItemsList(newSections), sources, lifetime.next()) {
+            concatenatedRoute(sources, it)
+        }
 
         // If previousSections is empty, we can't translate mutations - treat as Reload
         val change = if (previousSections.isEmpty() && delta.change !is SectionedChange.Reload) {
@@ -137,6 +146,24 @@ internal class FlattenedSectionList<S, T, R>(
         if (headerMapper != null) count++
         if (footerMapper != null) count++
         count
+    }
+
+    fun lifecycleRoute(index: Int): LifecycleRoute<R>? {
+        if (index !in 0 until size) return null
+        var remaining = index
+        for (section in sections) {
+            if (headerMapper != null) {
+                if (remaining == 0) return null
+                remaining--
+            }
+            if (remaining < section.items.size) return route(section.items, remaining, itemMapper)
+            remaining -= section.items.size
+            if (footerMapper != null) {
+                if (remaining == 0) return null
+                remaining--
+            }
+        }
+        return null
     }
 
     override fun softGet(index: Int): SoftValue<R>? {
