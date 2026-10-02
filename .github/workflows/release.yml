@@ -14,7 +14,9 @@ jobs:
     name: Publish to Maven Central
     # macOS is required so the Kotlin/Native iOS artifacts of deltalist-core are
     # built and included in the multiplatform publication.
-    runs-on: macos-14
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
 

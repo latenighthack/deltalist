@@ -55,7 +55,9 @@ gpg --armor --export-secret-keys <KEY_ID>
 ## Releasing via GitHub Actions (recommended)
 
 `.github/workflows/release.yml` publishes and releases automatically when a `v*` tag is
-pushed. It runs on macOS so the iOS targets of `deltalist-core` are included.
+pushed. It runs on macOS 26 with Xcode 26.6 so the Apple SDK matches the
+Kotlin/Native platform libraries and the iOS targets of `deltalist-core` are included.
+CI uses the same pinned Xcode toolchain for hosted lifecycle qualification.
 
 Add these repository secrets (Settings → Secrets and variables → Actions):
 
