@@ -1,5 +1,6 @@
 name: DeltaListLifecycle
 options:
+  projectFormat: xcode15_3
   bundleIdPrefix: com.latenighthack.deltalist.tests
 settings:
   base:
