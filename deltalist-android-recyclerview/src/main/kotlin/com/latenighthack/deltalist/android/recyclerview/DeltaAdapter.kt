@@ -162,7 +162,7 @@ abstract class DeltaAdapter<T, VH : RecyclerView.ViewHolder> @JvmOverloads const
      * Stops collecting deltas and releases all lazy items.
      * Call this when the adapter is no longer needed.
      */
-    fun unbind() {
+    open fun unbind() {
         job?.cancel()
         job = null
         bindingToken = null

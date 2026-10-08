@@ -121,16 +121,26 @@ abstract class FlowDeltaAdapter<T, S, VH : RecyclerView.ViewHolder>(
     open fun onItemFlowError(holder: VH, error: Throwable) {}
 
     override fun bind(owner: LifecycleOwner) {
-        lifecycleOwner = owner
         super.bind(owner)
+        lifecycleOwner = owner
+    }
+
+    override fun unbind() {
+        // Stop callbacks before the base adapter releases their item ownership.
+        viewHolderJobs.keys.toList().forEach(::stopFlowCollection)
+        lifecycleOwner = null
+        super.unbind()
     }
 
     final override fun onBindViewHolder(holder: VH, position: Int) {
         val item = getItem(position)
+        // Stop while subclass bookkeeping still refers to the previous bound item.
+        val attached = holder.itemView.isAttachedToWindow
+        if (attached) stopFlowCollection(holder)
         onBindItem(holder, position, item)
         // Updates can rebind a visible holder without detaching it. Its subscription
         // must follow the new item; prefetch-only bindings still wait for attachment.
-        if (holder.itemView.isAttachedToWindow) startFlowCollection(holder, item)
+        if (attached) startFlowCollection(holder, item)
     }
 
     override fun onViewAttachedToWindow(holder: VH) {
@@ -142,13 +152,13 @@ abstract class FlowDeltaAdapter<T, S, VH : RecyclerView.ViewHolder>(
     }
 
     override fun onViewDetachedFromWindow(holder: VH) {
-        super.onViewDetachedFromWindow(holder)
         stopFlowCollection(holder)
+        super.onViewDetachedFromWindow(holder)
     }
 
     override fun onViewRecycled(holder: VH) {
-        super.onViewRecycled(holder)
         stopFlowCollection(holder)
+        super.onViewRecycled(holder)
     }
 
     private fun startFlowCollection(holder: VH, item: T) {
@@ -175,7 +185,8 @@ abstract class FlowDeltaAdapter<T, S, VH : RecyclerView.ViewHolder>(
     }
 
     private fun stopFlowCollection(holder: VH) {
-        viewHolderJobs.remove(holder)?.cancel()
+        val job = viewHolderJobs.remove(holder) ?: return
+        job.cancel()
         onItemFlowStopped(holder)
     }
 }
