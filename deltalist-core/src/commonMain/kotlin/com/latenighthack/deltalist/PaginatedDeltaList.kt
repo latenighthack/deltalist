@@ -232,9 +232,15 @@ internal class PaginatedDeltaListImpl<T, U>(
     private var _lastLeading = 0
 
     private fun emitChange(count: Int, isAppend: Boolean, isInitial: Boolean, previousRealSize: Int = 0) {
-        val currentList = createWrapper()
-        val newDisplaySize = currentList.size
         val newLeading = currentLeading()
+        val newDisplaySize = newLeading + _items.size + currentTrailing(newLeading)
+
+        // An empty continuation may only advance the token. Keep the published snapshot
+        // current in that case: its requests read the new token under the mutex. Creating
+        // an unpublished wrapper would invalidate the only request handles consumers own.
+        if (!isInitial && count == 0 && newDisplaySize == _lastDisplaySize && newLeading == _lastLeading) return
+
+        val currentList = createWrapper()
 
         if (isInitial) {
             _lastDisplaySize = newDisplaySize
@@ -242,9 +248,6 @@ internal class PaginatedDeltaListImpl<T, U>(
             state.value = Delta(currentList, Change.Reload)
             return
         }
-
-        // Nothing changed structurally (e.g. an empty page that didn't toggle a placeholder).
-        if (count == 0 && newDisplaySize == _lastDisplaySize && newLeading == _lastLeading) return
 
         val oldDisplaySize = _lastDisplaySize
         val oldLeading = _lastLeading
