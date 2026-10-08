@@ -233,6 +233,7 @@ final class RowsDeltaNSCollectionDataSource: DeltaNSCollectionDataSource<AnyObje
         didEndDisplaying item: NSCollectionViewItem,
         forRepresentedObjectAt indexPath: IndexPath
     ) {
+        super.collectionView(collectionView, didEndDisplaying: item, forRepresentedObjectAt: indexPath)
         stateStore.cellEndedDisplaying(item)
     }
 }

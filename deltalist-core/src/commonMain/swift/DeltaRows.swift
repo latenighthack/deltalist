@@ -242,6 +242,7 @@ final class RowsDeltaCollectionDataSource: DeltaCollectionDataSource<AnyObject> 
         didEndDisplaying cell: UICollectionViewCell,
         forItemAt indexPath: IndexPath
     ) {
+        super.collectionView(collectionView, didEndDisplaying: cell, forItemAt: indexPath)
         stateStore.cellEndedDisplaying(cell)
     }
 }

@@ -8,6 +8,14 @@ import UIKit
 import AppKit
 #endif
 
+#if canImport(UIKit)
+private final class LeaseProbeCell: UICollectionViewCell {}
+#else
+private final class LeaseProbeCell: NSCollectionViewItem {
+    override func loadView() { view = NSView() }
+}
+#endif
+
 private typealias Row = DemoCore.BindingProbeRow
 private typealias Binding = DeltaListCore.ViewModelListBinding<Row, Row>
 
@@ -280,4 +288,34 @@ final class LifecycleTests: XCTestCase {
             await eventually("list teardown") { probe.activeCollectors == 0 && observations.active.isEmpty && probe.acquiredCount == 0 }
         }
     }
+
+    func testRowDSLReleasesOffscreenLease() async {
+        let probe = BindingLifecycleProbe()
+        probe.append(key: "A")
+        #if canImport(UIKit)
+        let collection = UICollectionView(frame: .zero, collectionViewLayout: UICollectionViewFlowLayout())
+        #else
+        let collection = NSCollectionView(frame: .zero)
+        collection.collectionViewLayout = NSCollectionViewFlowLayout()
+        #endif
+        let dataSource = collection.items(probe.items) {
+            DeltaListCore.Row<Row, LeaseProbeCell>()
+        }
+        defer { dataSource.unbind() }
+        await eventually("DSL source started") { dataSource.totalSize == 1 }
+        let path = IndexPath(item: 0, section: 0)
+        #if canImport(UIKit)
+        let cell = dataSource.collectionView(collection, cellForItemAt: path)
+        #else
+        let cell = dataSource.collectionView(collection, itemForRepresentedObjectAt: path)
+        #endif
+        XCTAssertEqual(probe.acquiredCount, 1)
+        #if canImport(UIKit)
+        dataSource.collectionView(collection, didEndDisplaying: cell, forItemAt: path)
+        #else
+        dataSource.collectionView(collection, didEndDisplaying: cell, forRepresentedObjectAt: path)
+        #endif
+        XCTAssertEqual(probe.acquiredCount, 0, "DSL visibility teardown must run the base lease cleanup")
+    }
+
 }
