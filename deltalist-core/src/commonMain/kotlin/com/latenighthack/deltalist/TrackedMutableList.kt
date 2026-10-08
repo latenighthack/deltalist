@@ -63,10 +63,16 @@ internal class TrackedMutableList<T>(
     }
 
     override fun removeAll(elements: Collection<T>): Boolean {
+        // Snapshot membership first: elements can be this list or one of its mutable views.
+        val removedValues = elements.toSet()
         var modified = false
-        for (element in elements) {
-            if (remove(element)) {
+        var index = 0
+        while (index < size) {
+            if (backing[index] in removedValues) {
+                removeAt(index)
                 modified = true
+            } else {
+                index++
             }
         }
         return modified
