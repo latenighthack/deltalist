@@ -135,7 +135,9 @@ internal class MoveableDeltaListImpl<T>(
 
     // The current list state (may be reordered during drag)
     private data class CurrentDisplay<T>(val delta: Delta<T>, val isLocal: Boolean)
-    private val _currentDelta = MutableStateFlow<CurrentDisplay<T>?>(null)
+    private val _currentDelta = DeltaState<CurrentDisplay<T>?>(null) { publication ->
+        publication?.copy(delta = Delta(publication.delta.items, Change.Reload))
+    }
 
     // Snapshot of list before drag started (for revert on cancel/failure)
     private var preDropItems: List<T>? = null
