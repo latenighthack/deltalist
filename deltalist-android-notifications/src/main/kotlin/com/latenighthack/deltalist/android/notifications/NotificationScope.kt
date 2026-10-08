@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.core.app.NotificationCompat
 
 /**
@@ -54,17 +55,24 @@ class NotificationScope<T> internal constructor(
     private fun pendingIntent(type: NotificationInteraction.Type, actionKey: String?): PendingIntent {
         val intent = Intent(context, DeltaNotificationReceiver::class.java).apply {
             action = ACTION_INTERACT
+            // Extras do not participate in PendingIntent identity. Encode every routing
+            // field as a separate URI segment, avoiding both namespace and hash collisions.
+            data = Uri.Builder()
+                .scheme("deltalist-notification")
+                .authority(context.packageName)
+                .appendPath(config.tag)
+                .appendPath(stableId.toString())
+                .appendPath(type.name)
+                .appendPath(actionKey ?: "")
+                .build()
             putExtra(EXTRA_TAG, config.tag)
             putExtra(EXTRA_STABLE_ID, stableId)
             putExtra(EXTRA_TYPE, type.name)
             actionKey?.let { putExtra(EXTRA_ACTION_KEY, it) }
         }
-        // Distinct request code per (notification id, action) so PendingIntents never alias.
-        val keyPart = actionKey ?: "__${type.name}__"
-        val requestCode = config.notifId(stableId) * 31 + keyPart.hashCode()
         return PendingIntent.getBroadcast(
             context,
-            requestCode,
+            0,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
