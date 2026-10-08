@@ -172,6 +172,7 @@ final class TrayEntry {
     var stateTask: Task<Void, Never>?
     var lastPostAt: Date?
     var pendingFlush: Task<Void, Never>?
+    var pendingState: Any?
 
     init(stableId: Int32, item: AnyObject, state: Any?) {
         self.stableId = stableId
@@ -257,6 +258,7 @@ final class TrayController {
             entry.stateTask = nil
             entry.pendingFlush?.cancel()
             entry.pendingFlush = nil
+            entry.pendingState = nil
         }
     }
 
@@ -271,20 +273,30 @@ final class TrayController {
     // Trailing-edge throttle: coalesce rapid emissions to at most one re-post per sample period,
     // always applying the most recent value. Equivalent to the Kotlin `sample()`.
     private func onState(_ entry: TrayEntry, _ newState: Any?) {
-        guard !statesEqual(newState, entry.state) else { return }
+        if statesEqual(newState, entry.state) {
+            // A reversion supersedes a pending change just like any other emission.
+            entry.pendingFlush?.cancel()
+            entry.pendingFlush = nil
+            entry.pendingState = nil
+            return
+        }
 
         let now = Date()
         let elapsed = entry.lastPostAt.map { now.timeIntervalSince($0) } ?? .greatestFiniteMagnitude
         if elapsed >= samplePeriod {
             applyState(entry, newState)
-        } else if entry.pendingFlush == nil {
+        } else {
+            entry.pendingState = newState
+            guard entry.pendingFlush == nil else { return }
             let delay = samplePeriod - elapsed
             entry.pendingFlush = Task { @MainActor [weak self, weak entry] in
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 guard let self = self, let entry = entry, !Task.isCancelled else { return }
                 entry.pendingFlush = nil
-                if !self.statesEqual(newState, entry.state) {
-                    self.applyState(entry, newState)
+                let latest = entry.pendingState
+                entry.pendingState = nil
+                if !self.statesEqual(latest, entry.state) {
+                    self.applyState(entry, latest)
                 }
             }
         }
@@ -295,6 +307,7 @@ final class TrayController {
         entry.lastPostAt = Date()
         entry.pendingFlush?.cancel()
         entry.pendingFlush = nil
+        entry.pendingState = nil
         sink.post(entry.stableId, entry.item, newState)
     }
 
