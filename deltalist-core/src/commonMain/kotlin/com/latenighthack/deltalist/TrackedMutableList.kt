@@ -4,6 +4,7 @@ internal class TrackedMutableList<T>(
     initial: List<T>
 ) : AbstractMutableList<T>() {
     private val backing = initial.toMutableList()
+    private val initialSize = initial.size
     private val operations = mutableListOf<TrackedOperation>()
 
     override val size: Int get() = backing.size
@@ -33,17 +34,21 @@ internal class TrackedMutableList<T>(
     }
 
     override fun addAll(index: Int, elements: Collection<T>): Boolean {
-        if (elements.isEmpty()) return false
-        backing.addAll(index, elements)
-        operations.add(TrackedOperation.Add(index, elements.size))
+        // Copy before changing backing: the input may be this list or a live view.
+        val additions = elements.toList()
+        if (additions.isEmpty()) return false
+        backing.addAll(index, additions)
+        operations.add(TrackedOperation.Add(index, additions.size))
         return true
     }
 
     override fun addAll(elements: Collection<T>): Boolean {
-        if (elements.isEmpty()) return false
+        // Copy before changing backing: the input may be this list or a live view.
+        val additions = elements.toList()
+        if (additions.isEmpty()) return false
         val index = backing.size
-        backing.addAll(elements)
-        operations.add(TrackedOperation.Add(index, elements.size))
+        backing.addAll(additions)
+        operations.add(TrackedOperation.Add(index, additions.size))
         return true
     }
 
@@ -115,14 +120,14 @@ internal class TrackedMutableList<T>(
         operations.add(TrackedOperation.Move(fromIndex, toIndex))
     }
 
-    fun toMutations(): List<Mutation> = operations.map { op ->
+    fun toMutations(): List<Mutation> = normalizeMutations(initialSize, operations.map { op ->
         when (op) {
             is TrackedOperation.Add -> Mutation.Insert(op.index, op.count)
             is TrackedOperation.Remove -> Mutation.Remove(op.index, op.count)
             is TrackedOperation.Update -> Mutation.Update(op.index)
             is TrackedOperation.Move -> Mutation.Move(op.fromIndex, op.toIndex)
         }
-    }
+    })
 
     fun toList(): List<T> = backing.toList()
 }

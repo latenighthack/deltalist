@@ -316,10 +316,11 @@ class DeltaListBuilderTest {
 
         val change = results[1].change as Change.Mutations
         assertEquals(3, change.operations.size)
-        assertTrue(change.operations[0] is Mutation.Insert)
-        assertTrue(change.operations[1] is Mutation.Remove)
+        assertTrue(change.operations[0] is Mutation.Remove)
+        assertTrue(change.operations[1] is Mutation.Insert)
         assertTrue(change.operations[2] is Mutation.Update)
         assertEquals(listOf(Item("2", "B-Updated"), Item("3", "C")), results[1].items.toList())
+        assertEquals(results[1].items.toList(), applyChange(results[0].items.toList(), results[1]))
     }
 
     @Test
@@ -786,9 +787,9 @@ class DeltaListBuilderTest {
 
         assertEquals(2, results.size)
 
-        val change = results[1].change as Change.Mutations
-        assertEquals(2, change.operations.size)
         assertEquals(listOf(Item("1", "A"), Item("X", "Middle"), Item("2", "B")), results[1].items.toList())
+        assertTrue(results[1].change is Change.Mutations)
+        assertEquals(results[1].items.toList(), applyChange(results[0].items.toList(), results[1]))
     }
 
     @Test

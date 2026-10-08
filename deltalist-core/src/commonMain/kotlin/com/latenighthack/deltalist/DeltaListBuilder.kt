@@ -145,6 +145,7 @@ internal class MutatingDeltaListImpl<T>(
 
     private val backing = initial.toMutableList()
     private val operations = mutableListOf<Mutation>()
+    private val initialSize = initial.size
 
     override val size: Int get() = backing.size
 
@@ -156,17 +157,21 @@ internal class MutatingDeltaListImpl<T>(
     }
 
     override fun addAll(elements: Collection<T>): Boolean {
-        if (elements.isEmpty()) return false
+        // Copy before changing backing: the input may be this list or a live view.
+        val additions = elements.toList()
+        if (additions.isEmpty()) return false
         val index = backing.size
-        backing.addAll(elements)
-        operations.add(Mutation.Insert(index, elements.size))
+        backing.addAll(additions)
+        operations.add(Mutation.Insert(index, additions.size))
         return true
     }
 
     override fun addAll(index: Int, elements: Collection<T>): Boolean {
-        if (elements.isEmpty()) return false
-        backing.addAll(index, elements)
-        operations.add(Mutation.Insert(index, elements.size))
+        // Copy before changing backing: the input may be this list or a live view.
+        val additions = elements.toList()
+        if (additions.isEmpty()) return false
+        backing.addAll(index, additions)
+        operations.add(Mutation.Insert(index, additions.size))
         return true
     }
 
@@ -196,7 +201,7 @@ internal class MutatingDeltaListImpl<T>(
         operations.add(Mutation.Remove(0, count))
     }
 
-    fun toMutations(): List<Mutation> = operations.toList()
+    fun toMutations(): List<Mutation> = normalizeMutations(initialSize, operations.toList())
 
     fun toList(): List<T> = backing.toList()
 }
@@ -253,16 +258,20 @@ private class ListMutatingDeltaListImpl<T>(
     }
 
     override suspend fun addAll(elements: Collection<T>) {
-        if (elements.isEmpty()) return
+        // Copy before changing backing: the input may be this list or a live view.
+        val additions = elements.toList()
+        if (additions.isEmpty()) return
         val index = backing.size
-        backing.addAll(elements)
-        emitMutation(Mutation.Insert(index, elements.size))
+        backing.addAll(additions)
+        emitMutation(Mutation.Insert(index, additions.size))
     }
 
     override suspend fun addAll(index: Int, elements: Collection<T>) {
-        if (elements.isEmpty()) return
-        backing.addAll(index, elements)
-        emitMutation(Mutation.Insert(index, elements.size))
+        // Copy before changing backing: the input may be this list or a live view.
+        val additions = elements.toList()
+        if (additions.isEmpty()) return
+        backing.addAll(index, additions)
+        emitMutation(Mutation.Insert(index, additions.size))
     }
 
     override suspend fun remove(element: T): Boolean {
