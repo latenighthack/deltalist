@@ -66,7 +66,12 @@ fun <S, T, R> SectionedDeltaList<S, T>.flatten(
                             )
                         }
                     }
-                    Change.Mutations(flatMutations)
+                    // Footer content depends on the loaded items, including their order.
+                    // Its position is final: append the update after all item mutations.
+                    val footerUpdate = if (footer != null) {
+                        listOf(Mutation.Update(offset + newSections[sectionedChange.section].items.size))
+                    } else emptyList()
+                    Change.Mutations(flatMutations + footerUpdate)
                 }
             }
         }
@@ -301,9 +306,12 @@ private fun <S, T> translateSectionMutations(
             }
 
             is SectionMutation.Update -> {
-                if (hasHeader) {
-                    val offset = calculateFlatOffset(workingSections, mutation.index, hasHeader, hasFooter)
-                    result.add(Mutation.Update(offset, 1))
+                val offset = calculateFlatOffset(workingSections, mutation.index, hasHeader, hasFooter)
+                if (hasHeader) result.add(Mutation.Update(offset))
+                // Footer mappers receive the header too, even when no header row is shown.
+                if (hasFooter) {
+                    val footerIndex = offset + (if (hasHeader) 1 else 0) + workingSections[mutation.index].items.size
+                    result.add(Mutation.Update(footerIndex))
                 }
             }
         }
