@@ -105,50 +105,38 @@ fun <S, T> sectionedDeltaList(
         return flowOf(SectionedDelta(emptyList(), SectionedChange.Reload))
     }
 
-    val flows = sections.map { (header, itemFlow) ->
-        itemFlow.map { delta -> header to delta }
-    }
+    val flows = sections.map { (_, itemFlow) -> itemFlow.withEmissionSequence() }
 
     return flow {
-        // Only the section whose Delta reference changed this tick actually emitted; stale changes
-        // on the other sections must be ignored, otherwise the operator over-reloads (or worse,
-        // attributes a change to the wrong section) once several sections have each mutated.
-        var prevDeltas: Array<Delta<T>>? = null
-
+        var previous: Array<SequencedDelta<T>>? = null
         emitAll(
-            combine(flows) { headerDeltaPairs ->
-                val sectionList = headerDeltaPairs.map { (header, delta) ->
-                    Section(header, delta.items)
+            combine(flows) { emissions ->
+                val sectionList = emissions.mapIndexed { index, emission ->
+                    Section(sections[index].first, emission.delta.items)
                 }
-
-                val previous = prevDeltas
-                val emitterReloaded = headerDeltaPairs.withIndex().any { (i, pair) ->
-                    (previous == null || pair.second !== previous[i]) && pair.second.change is Change.Reload
+                val old = previous
+                // combine may consume several values from one child before invoking this
+                // transform. A latest mutation is only valid after its immediate predecessor.
+                val needsReload = old == null || emissions.withIndex().any { (index, emission) ->
+                    val prior = old[index]
+                    emission.sequence != prior.sequence &&
+                        (emission.sequence != prior.sequence + 1 || emission.delta.change is Change.Reload)
                 }
-
-                val change = if (previous == null || emitterReloaded) {
+                val change = if (needsReload) {
                     SectionedChange.Reload
                 } else {
-                    // Item changes from sections that actually emitted this tick.
-                    val itemChanges = headerDeltaPairs.mapIndexedNotNull { index, (_, delta) ->
-                        val emitted = delta !== previous[index]
-                        val mutations = delta.change as? Change.Mutations
-                        if (emitted && mutations != null && mutations.operations.isNotEmpty()) {
+                    val itemChanges = emissions.mapIndexedNotNull { index, emission ->
+                        val mutations = emission.delta.change as? Change.Mutations
+                        if (emission.sequence != old!![index].sequence && mutations != null && mutations.operations.isNotEmpty()) {
                             index to mutations.operations
                         } else null
                     }
-                    when {
-                        itemChanges.isEmpty() -> SectionedChange.Reload
-                        itemChanges.size == 1 -> {
-                            val (sectionIndex, mutations) = itemChanges[0]
-                            SectionedChange.Items(sectionIndex, mutations)
-                        }
-                        // Multiple sections genuinely changed in one tick - reload for simplicity.
-                        else -> SectionedChange.Reload
-                    }
+                    if (itemChanges.size == 1) {
+                        val (index, mutations) = itemChanges.single()
+                        SectionedChange.Items(index, mutations)
+                    } else SectionedChange.Reload
                 }
-
-                prevDeltas = Array(headerDeltaPairs.size) { headerDeltaPairs[it].second }
+                previous = emissions.copyOf()
                 SectionedDelta(sectionList, change)
             }
         )

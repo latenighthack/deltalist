@@ -8,6 +8,12 @@ import com.latenighthack.deltalist.Mutation
 import com.latenighthack.deltalist.SectionedChange
 import com.latenighthack.deltalist.SectionedDelta
 import com.latenighthack.deltalist.softLoadedItems
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -117,5 +123,37 @@ class SectionedConcatTest {
 
         deltas.assertSectionedOracle()
         assertTrue(deltas.last().change is SectionedChange.Reload)
+    }
+
+    @Test
+    fun sectionedDeltaListReloadsAfterBackpressureSkipsChildEmissions() = runTest {
+        val begin = CompletableDeferred<Unit>()
+        val unblock = CompletableDeferred<Unit>()
+        val child = flow {
+            emit(Delta(listOf("A"), Change.Reload))
+            begin.await()
+            emit(Delta(listOf("A", "B"), Change.Mutations(Mutation.Insert(1))))
+            emit(Delta(listOf("A", "B", "C"), Change.Mutations(Mutation.Insert(2))))
+            emit(Delta(listOf("A", "B", "C", "D"), Change.Mutations(Mutation.Insert(3))))
+        }
+        val deltas = mutableListOf<SectionedDelta<String, String>>()
+        val job = launch {
+            sectionedDeltaList("left" to child, "right" to flowOf(Delta(listOf("Z"), Change.Reload)))
+                .collect { delta ->
+                    deltas += delta
+                    if (deltas.size == 1) {
+                        begin.complete(Unit)
+                        unblock.await()
+                    }
+                }
+        }
+        runCurrent()
+        unblock.complete(Unit)
+        runCurrent()
+        job.cancelAndJoin()
+
+        deltas.assertSectionedOracle()
+        assertEquals(listOf("A", "B", "C", "D"), deltas.last().sections[0].items.softLoadedItems())
+        assertTrue(deltas.drop(1).any { it.change is SectionedChange.Reload })
     }
 }
