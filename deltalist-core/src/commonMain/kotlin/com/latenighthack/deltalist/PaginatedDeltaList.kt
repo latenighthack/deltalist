@@ -70,14 +70,14 @@ internal class PaginatedDeltaListImpl<T, U>(
     private var _isLoadingAfter = false
     private var _initialLoadDone = false
 
-    private val state = DeltaState(Delta(createWrapper(), Change.Reload)) {
-        Delta(it.items, Change.Reload)
-    }
-
     // Bumped per emitted snapshot. The fetch-trigger closures below capture the generation
     // they were created in and no-op once superseded, so a stale snapshot's request() can't
     // drive a fetch (decision A: side effects honored only on the current snapshot).
     private var generation = 0
+
+    private val state = DeltaState(Delta(createWrapper(), Change.Reload)) {
+        Delta(it.items, Change.Reload)
+    }
 
     private fun createWrapper(): PaginatedListWrapper<T> {
         generation += 1
@@ -89,8 +89,8 @@ internal class PaginatedDeltaListImpl<T, U>(
             trailing = currentTrailing(leading),
             hasMoreBefore = _beforeToken != null,
             hasMoreAfter = _afterToken != null || !_initialLoadDone,
-            onAccessNearStart = { if (myGen == generation) triggerBeforeFetch() },
-            onAccessNearEnd = { if (myGen == generation) triggerAfterFetch() }
+            onAccessNearStart = { triggerBeforeFetch(myGen) },
+            onAccessNearEnd = { triggerAfterFetch(myGen) }
         )
     }
 
@@ -120,9 +120,6 @@ internal class PaginatedDeltaListImpl<T, U>(
     }
 
     private fun triggerInitialFetch() {
-        // Early check to avoid launching unnecessary coroutines
-        if (_initialLoadDone || _isLoadingAfter) return
-
         scope.launch {
             mutex.withLock {
                 // Double-check under lock for thread safety
@@ -155,16 +152,15 @@ internal class PaginatedDeltaListImpl<T, U>(
         }
     }
 
-    private fun triggerBeforeFetch() {
-        // Early check to avoid launching unnecessary coroutines
-        if (_isLoadingBefore) return
-        val token = _beforeToken ?: return
-
+    private fun triggerBeforeFetch(requestedGeneration: Int) {
         scope.launch {
-            mutex.withLock {
-                // Double-check under lock for thread safety
-                if (_isLoadingBefore || _beforeToken == null) return@launch
+            val token = mutex.withLock {
+                // Validate the request and capture its token in the same critical section.
+                // A previously queued request must not fetch a token from an older snapshot.
+                if (requestedGeneration != generation || _isLoadingBefore) return@launch
+                val currentToken = _beforeToken ?: return@launch
                 _isLoadingBefore = true
+                currentToken
             }
 
             try {
@@ -196,16 +192,13 @@ internal class PaginatedDeltaListImpl<T, U>(
         }
     }
 
-    private fun triggerAfterFetch() {
-        // Early check to avoid launching unnecessary coroutines
-        if (_isLoadingAfter) return
-        val token = _afterToken ?: return
-
+    private fun triggerAfterFetch(requestedGeneration: Int) {
         scope.launch {
-            mutex.withLock {
-                // Double-check under lock for thread safety
-                if (_isLoadingAfter || _afterToken == null) return@launch
+            val token = mutex.withLock {
+                if (requestedGeneration != generation || _isLoadingAfter) return@launch
+                val currentToken = _afterToken ?: return@launch
                 _isLoadingAfter = true
+                currentToken
             }
 
             try {
@@ -329,9 +322,7 @@ internal class PaginatedDeltaListImpl<T, U>(
 
     override suspend fun collect(collector: kotlinx.coroutines.flow.FlowCollector<Delta<T>>) {
         // Trigger initial fetch when collection starts
-        if (!_initialLoadDone && _items.isEmpty()) {
-            triggerInitialFetch()
-        }
+        triggerInitialFetch()
         state.collect(collector)
     }
 }
