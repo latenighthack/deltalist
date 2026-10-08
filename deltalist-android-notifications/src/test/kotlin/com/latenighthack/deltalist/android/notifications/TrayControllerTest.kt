@@ -27,6 +27,7 @@ private class FakeSink<E : Stable, T> : NotificationSink<E, T> {
     val ops = mutableListOf<String>()
     val states = mutableMapOf<Int, Any?>()
     var postCount = 0
+    val summaries = mutableListOf<List<E>>()
 
     override fun post(stableId: Int, value: T, state: Any?) {
         ops.add("post:$stableId")
@@ -40,6 +41,7 @@ private class FakeSink<E : Stable, T> : NotificationSink<E, T> {
 
     override fun postSummary(items: List<E>) {
         ops.add("summary:${items.size}")
+        summaries.add(items.toList())
     }
 
     override fun cancelSummary() {
@@ -154,6 +156,25 @@ class TrayControllerTest {
 
         tray.applyDelta(mutations(emptyList(), Mutation.Remove(0)))
         assertEquals(listOf("cancel:1", "summaryCancel"), sink.ops)
+    }
+
+    @Test
+    fun summary_reflects_updated_values_order_and_reload() {
+        val sink = FakeSink<Wrapped<Box>, Box>()
+        val tray = controller(sink, grouped = true)
+        val a = Wrapped(1, Box("a"))
+        val b = Wrapped(2, Box("b"))
+        tray.applyDelta(reload(listOf(a, b)))
+
+        val updated = Wrapped(1, Box("updated"))
+        tray.applyDelta(mutations(listOf(updated, b), Mutation.Update(0)))
+        assertEquals(listOf("updated", "b"), sink.summaries.last().map { it.value.label })
+
+        tray.applyDelta(mutations(listOf(b, updated), Mutation.Move(0, 1)))
+        assertEquals(listOf(2, 1), sink.summaries.last().map { it.stableId })
+
+        tray.applyDelta(reload(listOf(b, updated)))
+        assertEquals(4, sink.summaries.size)
     }
 
     @Test

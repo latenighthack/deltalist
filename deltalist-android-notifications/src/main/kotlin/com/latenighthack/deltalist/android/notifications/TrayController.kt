@@ -59,8 +59,6 @@ internal class TrayController<E : Stable, T>(
         val newItems = delta.items.softLoadedItems()
         val newIds = HashSet<Int>(newItems.size).apply { newItems.forEach { add(it.stableId) } }
 
-        var changed = false
-
         // Cancel ids that are gone.
         val iterator = entries.entries.iterator()
         while (iterator.hasNext()) {
@@ -69,7 +67,6 @@ internal class TrayController<E : Stable, T>(
                 entry.stateJob?.cancel()
                 sink.cancel(entry.stableId)
                 iterator.remove()
-                changed = true
             }
         }
 
@@ -84,7 +81,6 @@ internal class TrayController<E : Stable, T>(
                 rebuilt[id] = entry
                 sink.post(id, entry.value, entry.state)
                 startStateJob(entry)
-                changed = true
             } else {
                 val valueChanged = existing.value !== value
                 existing.value = value
@@ -97,7 +93,9 @@ internal class TrayController<E : Stable, T>(
         entries.clear()
         entries.putAll(rebuilt)
 
-        if (grouped && changed) {
+        // Summary content can depend on every member's value and order, not just
+        // membership. Refresh it for updates, moves and reloads as well.
+        if (grouped) {
             if (newItems.isEmpty()) sink.cancelSummary() else sink.postSummary(newItems)
         }
     }
