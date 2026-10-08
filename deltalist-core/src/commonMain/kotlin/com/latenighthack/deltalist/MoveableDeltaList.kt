@@ -5,9 +5,9 @@ import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.merge
 
 /**
@@ -134,7 +134,8 @@ internal class MoveableDeltaListImpl<T>(
     override val dragState: StateFlow<DragState<T>> = _dragState.asStateFlow()
 
     // The current list state (may be reordered during drag)
-    private val _currentDelta = MutableStateFlow<Delta<T>?>(null)
+    private data class CurrentDisplay<T>(val delta: Delta<T>, val isLocal: Boolean)
+    private val _currentDelta = MutableStateFlow<CurrentDisplay<T>?>(null)
 
     // Snapshot of list before drag started (for revert on cancel/failure)
     private var preDropItems: List<T>? = null
@@ -143,7 +144,7 @@ internal class MoveableDeltaListImpl<T>(
     private var originalDragIndex: Int = -1
 
     override fun beginDrag(index: Int): Boolean {
-        val currentDelta = _currentDelta.value ?: return false
+        val currentDelta = _currentDelta.value?.delta ?: return false
 
         // Can't start a new drag while one is in progress
         if (_dragState.value !is DragState.Idle) return false
@@ -170,7 +171,7 @@ internal class MoveableDeltaListImpl<T>(
         val current = _dragState.value
         if (current !is DragState.Dragging) return
 
-        val currentDelta = _currentDelta.value ?: return
+        val currentDelta = _currentDelta.value?.delta ?: return
 
         // Clamp to valid range
         val clampedIndex = toIndex.coerceIn(0, maxOf(0, currentDelta.items.size - 1))
@@ -189,10 +190,10 @@ internal class MoveableDeltaListImpl<T>(
         newItems.add(clampedIndex, item)
 
         // Emit the reordered list with Move mutation
-        _currentDelta.value = Delta(
+        _currentDelta.value = CurrentDisplay(Delta(
             newItems.asSoftList(),
             Change.Mutations(listOf(Mutation.Move(current.previewIndex, clampedIndex)))
-        )
+        ), isLocal = true)
 
         _dragState.value = current.copy(previewIndex = clampedIndex)
     }
@@ -239,7 +240,7 @@ internal class MoveableDeltaListImpl<T>(
         if (current !is DragState.Dragging) return false
 
         val fromIndex = originalDragIndex
-        val clampedToIndex = toIndex.coerceIn(0, maxOf(0, (_currentDelta.value?.items?.size ?: 1) - 1))
+        val clampedToIndex = toIndex.coerceIn(0, maxOf(0, (_currentDelta.value?.delta?.items?.size ?: 1) - 1))
 
         // No-op if dropped in the same position
         if (fromIndex == clampedToIndex) {
@@ -288,7 +289,7 @@ internal class MoveableDeltaListImpl<T>(
     private fun revert() {
         val original = preDropItems
         if (original != null) {
-            _currentDelta.value = Delta(original.asSoftList(), Change.Reload)
+            _currentDelta.value = CurrentDisplay(Delta(original.asSoftList(), Change.Reload), isLocal = true)
         }
         cleanup()
     }
@@ -332,11 +333,11 @@ internal class MoveableDeltaListImpl<T>(
             val currentState = _dragState.value
             when {
                 currentState is DragState.Idle -> {
-                    _currentDelta.value = delta
+                    _currentDelta.value = CurrentDisplay(delta, isLocal = false)
                     delta
                 }
                 currentState is DragState.Committing -> {
-                    _currentDelta.value = delta
+                    _currentDelta.value = CurrentDisplay(delta, isLocal = false)
                     if (currentState.confirmed) {
                         // Already received confirmation (e.g., Reload), pass through
                         delta
@@ -360,8 +361,10 @@ internal class MoveableDeltaListImpl<T>(
             }
         }.filterNotNull()
 
-        val dragFlow = _currentDelta.filterNotNull().filter {
-            _dragState.value is DragState.Dragging
+        // Routing belongs to the publication, not the mutable drag state: cleanup
+        // may have finished before a collector sees a rollback.
+        val dragFlow = _currentDelta.mapNotNull { publication ->
+            publication?.takeIf { it.isLocal }?.delta
         }
 
         merge(upstreamFlow, dragFlow).collect { delta ->
