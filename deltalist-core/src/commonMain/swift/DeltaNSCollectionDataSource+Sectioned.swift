@@ -47,6 +47,7 @@ public class SectionedDeltaNSCollectionDataSource<H: AnyObject, T: AnyObject>: N
     private var appliedSectionCount: Int = 0
     private var applyingSection: Int = -1
     private var applyingItemCount: Int = 0
+    private var applyingSections: [SectionData]?
 
     private let itemProvider: ItemProvider
     private let headerProvider: HeaderProvider?
@@ -200,13 +201,14 @@ public class SectionedDeltaNSCollectionDataSource<H: AnyObject, T: AnyObject>: N
             return
         }
 
+        let oldSections = sections
         let oldSectionCount = sections.count
         let oldItemCounts = sections.map { $0.items.count }
         sections = newSections
         onSectionsChanged?(newSections)
 
         if let change = change {
-            applySectionedChange(change, oldSectionCount: oldSectionCount, oldItemCounts: oldItemCounts)
+            applySectionedChange(change, oldSections: oldSections, oldSectionCount: oldSectionCount, oldItemCounts: oldItemCounts)
         } else {
             appliedSectionCount = newSections.count
             collectionView?.reloadData()
@@ -272,6 +274,7 @@ public class SectionedDeltaNSCollectionDataSource<H: AnyObject, T: AnyObject>: N
     private func applyChanges(newSections: [SectionData], change: SectionedChange) {
         // Capture pre-change counts before overwriting `sections` so the per-operation
         // stepping below can report consistent intermediate counts.
+        let oldSections = sections
         let oldSectionCount = sections.count
         let oldItemCounts = sections.map { $0.items.count }
 
@@ -287,10 +290,10 @@ public class SectionedDeltaNSCollectionDataSource<H: AnyObject, T: AnyObject>: N
             return
         }
 
-        applySectionedChange(change, oldSectionCount: oldSectionCount, oldItemCounts: oldItemCounts)
+        applySectionedChange(change, oldSections: oldSections, oldSectionCount: oldSectionCount, oldItemCounts: oldItemCounts)
     }
 
-    private func applySectionedChange(_ change: SectionedChange, oldSectionCount: Int, oldItemCounts: [Int]) {
+    private func applySectionedChange(_ change: SectionedChange, oldSections: [SectionData], oldSectionCount: Int, oldItemCounts: [Int]) {
         guard let collectionView = collectionView else { return }
 
         if change is SectionedChange.Reload {
@@ -302,9 +305,18 @@ public class SectionedDeltaNSCollectionDataSource<H: AnyObject, T: AnyObject>: N
         if let sectionChanges = change as? SectionedChange.Sections {
             // Section-level mutations in running coordinates: apply one per batch, stepping
             // appliedSectionCount (which numberOfSections returns during application).
+            guard let states = deltaSectionStates(sectionChanges.mutations, old: oldSections,
+                                                  new: sections, itemCount: { $0.items.count }) else {
+                appliedSectionCount = sections.count
+                collectionView.reloadData()
+                return
+            }
             appliedSectionCount = oldSectionCount
-            for mutation in sectionChanges.mutations {
+            applyingSections = oldSections
+            defer { applyingSections = nil }
+            for (index, mutation) in sectionChanges.mutations.enumerated() {
                 collectionView.performBatchUpdates({
+                    self.applyingSections = states[index]
                     if let insert = mutation as? SectionMutation.Insert {
                         let c = Int(insert.count)
                         self.appliedSectionCount += c
@@ -404,6 +416,7 @@ public class SectionedDeltaNSCollectionDataSource<H: AnyObject, T: AnyObject>: N
     }
 
     public func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
+        let sections = applyingSections ?? self.sections
         // Reflects intermediate state for the section currently being mutated.
         if section == applyingSection { return applyingItemCount }
         guard section < sections.count else { return 0 }
@@ -411,6 +424,7 @@ public class SectionedDeltaNSCollectionDataSource<H: AnyObject, T: AnyObject>: N
     }
 
     public func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
+        let sections = applyingSections ?? self.sections
         guard indexPath.section < sections.count,
               indexPath.item < sections[indexPath.section].items.count else {
             // Never fatalError in an item provider: a transient inconsistency during an
@@ -422,6 +436,7 @@ public class SectionedDeltaNSCollectionDataSource<H: AnyObject, T: AnyObject>: N
     }
 
     public func collectionView(_ collectionView: NSCollectionView, viewForSupplementaryElementOfKind kind: NSCollectionView.SupplementaryElementKind, at indexPath: IndexPath) -> NSView {
+        let sections = applyingSections ?? self.sections
         guard kind == NSCollectionView.elementKindSectionHeader,
               let headerProvider = headerProvider,
               indexPath.section < sections.count else {
