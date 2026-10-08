@@ -128,7 +128,9 @@ abstract class FlowDeltaAdapter<T, S, VH : RecyclerView.ViewHolder>(
     final override fun onBindViewHolder(holder: VH, position: Int) {
         val item = getItem(position)
         onBindItem(holder, position, item)
-        // Flow collection starts on attach, not bind
+        // Updates can rebind a visible holder without detaching it. Its subscription
+        // must follow the new item; prefetch-only bindings still wait for attachment.
+        if (holder.itemView.isAttachedToWindow) startFlowCollection(holder, item)
     }
 
     override fun onViewAttachedToWindow(holder: VH) {
@@ -150,7 +152,10 @@ abstract class FlowDeltaAdapter<T, S, VH : RecyclerView.ViewHolder>(
     }
 
     private fun startFlowCollection(holder: VH, item: T) {
-        viewHolderJobs[holder]?.cancel()
+        viewHolderJobs.remove(holder)?.let {
+            it.cancel()
+            onItemFlowStopped(holder)
+        }
 
         val owner = lifecycleOwner ?: return
         val flow = flowAccessor(item)
