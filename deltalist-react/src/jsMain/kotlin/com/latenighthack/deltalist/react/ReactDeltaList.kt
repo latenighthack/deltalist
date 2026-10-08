@@ -30,7 +30,7 @@ private external object ReactInterop {
  * requesting every page. A virtualizer opts into positional loading with `visibleRange(start, end)`.
  */
 internal class ReactDeltaListController(
-    private val transform: (Any?) -> Any?,
+    private var transform: (Any?) -> Any?,
 ) {
     private var items: SoftList<Any?>? = null
     private val acquired = mutableMapOf<Int, ItemLease<Any?>>()
@@ -40,6 +40,14 @@ internal class ReactDeltaListController(
     private var revision = 0
 
     val proxy: dynamic = createProxy()
+
+    fun updateTransform(next: (Any?) -> Any?) {
+        if (transform === next) return
+        transform = next
+        // A new callback may capture new props while the source snapshot stays the
+        // same. Refresh wrappers without disturbing the controller's item leases.
+        mapped.clear()
+    }
 
     fun update(next: SoftList<Any?>) {
         // Acquire successors first, while previous leases still pin moved cache entries.
@@ -206,6 +214,7 @@ public fun useMappedDeltaList(
         controllerRef.current = ReactDeltaListController(transform)
     }
     val controller = controllerRef.current.unsafeCast<ReactDeltaListController>()
+    controller.updateTransform(transform)
 
     val version = ReactInterop.useState(js("({})"))
     val invalidate = version[1]
