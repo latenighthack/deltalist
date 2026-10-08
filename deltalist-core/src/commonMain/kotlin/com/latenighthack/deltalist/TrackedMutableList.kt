@@ -2,7 +2,7 @@ package com.latenighthack.deltalist
 
 internal class TrackedMutableList<T>(
     initial: List<T>
-) : MutableList<T> {
+) : AbstractMutableList<T>() {
     private val backing = initial.toMutableList()
     private val operations = mutableListOf<TrackedOperation>()
 
@@ -17,8 +17,6 @@ internal class TrackedMutableList<T>(
     override fun indexOf(element: T): Int = backing.indexOf(element)
 
     override fun isEmpty(): Boolean = backing.isEmpty()
-
-    override fun iterator(): MutableIterator<T> = backing.iterator()
 
     override fun lastIndexOf(element: T): Int = backing.lastIndexOf(element)
 
@@ -56,10 +54,6 @@ internal class TrackedMutableList<T>(
         operations.add(TrackedOperation.Remove(0, count))
     }
 
-    override fun listIterator(): MutableListIterator<T> = backing.listIterator()
-
-    override fun listIterator(index: Int): MutableListIterator<T> = backing.listIterator(index)
-
     override fun remove(element: T): Boolean {
         val index = backing.indexOf(element)
         if (index == -1) return false
@@ -85,11 +79,13 @@ internal class TrackedMutableList<T>(
     }
 
     override fun retainAll(elements: Collection<T>): Boolean {
+        // Membership must remain fixed if elements is a live view of this list.
+        val retainedValues = elements.toSet()
         var modified = false
         val iterator = backing.iterator()
         var index = 0
         while (iterator.hasNext()) {
-            if (iterator.next() !in elements) {
+            if (iterator.next() !in retainedValues) {
                 iterator.remove()
                 operations.add(TrackedOperation.Remove(index, 1))
                 modified = true
@@ -105,9 +101,6 @@ internal class TrackedMutableList<T>(
         operations.add(TrackedOperation.Update(index))
         return old
     }
-
-    override fun subList(fromIndex: Int, toIndex: Int): MutableList<T> =
-        backing.subList(fromIndex, toIndex)
 
     fun move(fromIndex: Int, toIndex: Int) {
         if (fromIndex == toIndex) return
