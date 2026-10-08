@@ -16,50 +16,32 @@ fun <T> concatSections(flows: List<DeltaList<T>>): DeltaList<T> {
     if (flows.size == 1) return flows[0]
 
     return flow {
-        // Per-source previous emissions: under `combine`, only the source whose Delta reference
-        // changed actually emitted this tick; the rest carry stale changes that must not be replayed.
         val lifetime = CompositionLifetime()
-        var prevDeltas: Array<Delta<T>>? = null
-        var prevCombinedLoaded: List<T>? = null
-
+        var previous: Array<SequencedDelta<T>>? = null
         emitAll(
-            combine(flows) { deltas ->
-                val sources = deltas.map { it.items }
+            combine(flows.map { it.withEmissionSequence() }) { emissions ->
+                val sources = emissions.map { it.delta.items }
                 val combinedItems = lifecycleList(ConcatenatedMultiList(sources), sources, lifetime.next()) {
                     concatenatedRoute(sources, it)
                 }
-                val newLoaded = combinedItems.softLoadedItems()
-
-                val previous = prevDeltas
-                val fullyLoaded = newLoaded.size == combinedItems.size
-
-                val emitterReloaded = deltas.withIndex().any { (i, d) ->
-                    (previous == null || d !== previous[i]) && d.change is Change.Reload
+                val old = previous
+                val needsReload = old == null || emissions.withIndex().any { (index, emission) ->
+                    emission.sequence != old[index].sequence && !emission.isConsecutiveMutationOf(old[index])
                 }
-
-                val change: Change = if (previous == null || emitterReloaded || !fullyLoaded) {
+                val change = if (needsReload) {
                     Change.Reload
                 } else {
-                    val ops = mutableListOf<Mutation>()
-                    for ((index, delta) in deltas.withIndex()) {
-                        val emitted = delta !== previous[index]
-                        val mutations = delta.change as? Change.Mutations
-                        if (emitted && mutations != null) {
-                            val offset = deltas.take(index).sumOf { it.items.size }
-                            mutations.operations.forEach { ops += it.offsetBy(offset) }
+                    val operations = mutableListOf<Mutation>()
+                    var offset = 0
+                    for ((index, emission) in emissions.withIndex()) {
+                        if (emission.sequence != old!![index].sequence) {
+                            operations += (emission.delta.change as Change.Mutations).operations.map { it.offsetBy(offset) }
                         }
+                        offset += emission.delta.items.size
                     }
-                    val prev = prevCombinedLoaded
-                    if (ops.isEmpty() || prev == null) {
-                        Change.Reload
-                    } else {
-                        val rebuilt = runCatching { applyChange(prev, Change.Mutations(ops), newLoaded) }.getOrNull()
-                        if (rebuilt == newLoaded) Change.Mutations(ops) else Change.Reload
-                    }
+                    if (operations.isEmpty()) Change.Reload else Change.Mutations(operations)
                 }
-
-                prevDeltas = deltas.copyOf()
-                prevCombinedLoaded = newLoaded
+                previous = emissions.copyOf()
                 Delta(combinedItems, change)
             }.onCompletion { cause -> if (cause != null) lifetime.close() }
         )
