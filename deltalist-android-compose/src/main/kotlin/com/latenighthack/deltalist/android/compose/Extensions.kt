@@ -2,20 +2,17 @@ package com.latenighthack.deltalist.android.compose
 
 import androidx.compose.runtime.RememberObserver
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
 import com.latenighthack.deltalist.DeltaList
 import com.latenighthack.deltalist.ItemLease
-import com.latenighthack.deltalist.LeasedLazyList
 import com.latenighthack.deltalist.LazyList
 import com.latenighthack.deltalist.SoftList
 import com.latenighthack.deltalist.SoftValue
-import com.latenighthack.deltalist.acquireOrGet
+import com.latenighthack.deltalist.acquireItemOrGet
 
 /**
  * Collects a [DeltaList] as Compose state.
@@ -99,34 +96,19 @@ fun <T> DeltaList<T>.collectAsDeltaState(
  * Use this helper for lazy items: ordinary reads do not own a composition lifecycle.
  *
  * @param index The index of the item to access
- * @param key A stable key for the item (used for DisposableEffect identity)
+ * @param key A stable key for the item (used for composition identity)
  * @return The item at the given index
  */
 @Composable
 fun <T> SoftList<T>.rememberItem(index: Int, key: Any): T {
     val list = this
-    if (list is LeasedLazyList<T>) return rememberLease(list, index, key).item
-    val item = remember(key) {
-        when (val v = list.acquireOrGet(index)) {
-            is SoftValue.Present -> v.value
-            is SoftValue.NotLoaded -> throw IndexOutOfBoundsException("Item at $index is not loaded")
-        }
+    if (list is LazyList<T>) return rememberLease(list, index, key).item
+    // A stable key identifies the row, not its current value. Ordinary snapshots
+    // can replace that value without changing the key.
+    return when (val value = list.softGet(index)) {
+        is SoftValue.Present -> value.value
+        else -> throw IndexOutOfBoundsException("Item at $index is not loaded")
     }
-
-    if (list is LazyList<*>) {
-        @Suppress("UNCHECKED_CAST")
-        val lazy = list as LazyList<T>
-        // The DisposableEffect is keyed on `key` (stable identity), so it does NOT restart
-        // when the item merely moves to a new index. Capturing the positional `index`
-        // directly would then release the wrong slot on disposal. Track the latest index
-        // for this key so onDispose releases the item's *current* position.
-        val currentIndex = rememberUpdatedState(index)
-        DisposableEffect(key) {
-            onDispose { lazy.release(currentIndex.value) }
-        }
-    }
-
-    return item
 }
 
 /**
@@ -158,20 +140,7 @@ fun <T> SoftList<T>.rememberItem(index: Int, key: Any): T {
 @Composable
 fun <T> SoftList<T>.rememberLazyItem(key: Any, index: Int) {
     val list = this
-    if (list is LeasedLazyList<T>) {
-        rememberLease(list, index, key)
-        return
-    }
-    if (list is LazyList<*>) {
-        @Suppress("UNCHECKED_CAST")
-        val lazy = list as LazyList<T>
-        // Release the item's current index, not the one captured at first composition
-        // (see rememberItem) so a move-while-composed doesn't release the wrong slot.
-        val currentIndex = rememberUpdatedState(index)
-        DisposableEffect(key) {
-            onDispose { lazy.release(currentIndex.value) }
-        }
-    }
+    if (list is LazyList<T>) rememberLease(list, index, key)
 }
 
 // Structural SoftList equality must not suppress acquisition handover to a new snapshot.
@@ -187,8 +156,8 @@ private class RememberedLease<T>(val lease: ItemLease<T>) : RememberObserver {
 }
 
 @Composable
-private fun <T> rememberLease(list: LeasedLazyList<T>, index: Int, key: Any): ItemLease<T> =
+private fun <T> rememberLease(list: LazyList<T>, index: Int, key: Any): ItemLease<T> =
     remember(key, SnapshotIdentity(list), index) {
-        RememberedLease(list.acquireItem(index)
+        RememberedLease(list.acquireItemOrGet(index)
             ?: throw IndexOutOfBoundsException("Item at $index is not loaded or snapshot is obsolete"))
     }.lease

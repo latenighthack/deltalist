@@ -27,7 +27,7 @@ android {
 dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("androidx.compose.ui:ui-test-junit4")
-    debugImplementation("androidx.compose.ui:ui-test-manifest")
+    testImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation("org.robolectric:robolectric:4.14.1")
     testImplementation(libs.kotlinx.coroutines.test)
     api(project(":deltalist-core"))
