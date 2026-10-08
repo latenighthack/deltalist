@@ -151,7 +151,7 @@ private fun <T, ID> computeDiff(
         val newItem = newList[t]
         val id = newIds[t]
         val oldItem = oldItemById[id]
-        if (oldItem != null && oldItem != newItem) {
+        if (id in oldIdSet && oldItem != newItem) {
             mutations.add(Mutation.Update(t, 1))
         }
     }
