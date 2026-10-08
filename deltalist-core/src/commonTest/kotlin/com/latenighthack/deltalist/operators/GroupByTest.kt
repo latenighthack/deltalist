@@ -86,4 +86,32 @@ class GroupByTest {
 
         deltas.assertFlatOracle()
     }
+
+    @Test
+    fun derivedHeaderChangesAreDeliveredWithItemUpdates() = runTest {
+        val source = MutableStateFlow(Delta(listOf(Row(0, 2), Row(1, 1)), Change.Reload))
+        val flat = source.groupBy(
+            keySelector = { it.key },
+            headerMapper = { key, items -> "$key:${items.sumOf { it.v }}" }
+        ).flatten(header = { "H:$it" }, item = { "I:${it.v}" })
+        val deltas = collectDriven(flat) {
+            step(source, Delta(listOf(Row(0, 4), Row(1, 1)), Change.Mutations(Mutation.Update(0))))
+        }
+        deltas.assertFlatOracle()
+        assertIs<Change.Reload>(deltas.last().change)
+        assertEquals(listOf("H:0:4", "I:4", "H:1:1", "I:1"), deltas.last().items.softLoadedItems())
+    }
+
+    @Test
+    fun unchangedMappedHeadersKeepIncrementalItemChanges() = runTest {
+        val source = MutableStateFlow(Delta(listOf(Row(0, 2)), Change.Reload))
+        val deltas = collectDriven(source.groupBy(
+            keySelector = { it.key },
+            headerMapper = { key, _ -> "group:$key" }
+        )) {
+            step(source, Delta(listOf(Row(0, 4)), Change.Mutations(Mutation.Update(0))))
+        }
+        deltas.assertSectionedOracle()
+        assertIs<SectionedChange.Items>(deltas.last().change)
+    }
 }

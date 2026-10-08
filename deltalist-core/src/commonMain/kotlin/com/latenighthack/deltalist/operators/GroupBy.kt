@@ -60,6 +60,7 @@ fun <T, K, S> DeltaList<T>.groupBy(
 ): SectionedDeltaList<S, T> = flow {
     var previousGroups: Map<K, List<T>> = emptyMap()
     var previousKeyOrder: List<K> = emptyList()
+    var previousHeaders: List<S> = emptyList()
 
     collect { delta ->
         val groups = linkedMapOf<K, MutableList<T>>()
@@ -74,9 +75,12 @@ fun <T, K, S> DeltaList<T>.groupBy(
             Section(headerMapper(key, items), items)
         }
 
-        val change = when (delta.change) {
-            is Change.Reload -> SectionedChange.Reload
-            is Change.Mutations -> {
+        val headers = sections.map { it.header }
+        // SectionedChange cannot represent simultaneous header and item changes. When
+        // derived header content changed, a reload delivers both parts consistently.
+        val change = when {
+            delta.change is Change.Reload || headers != previousHeaders -> SectionedChange.Reload
+            else -> {
                 val sectionChanges = computeGroupChanges(
                     previousKeyOrder,
                     previousGroups,
@@ -89,6 +93,7 @@ fun <T, K, S> DeltaList<T>.groupBy(
 
         previousGroups = groups
         previousKeyOrder = keyOrder
+        previousHeaders = headers
 
         emit(SectionedDelta(sections, change))
     }
