@@ -2,6 +2,9 @@
 
 package com.latenighthack.deltalist.operators
 
+import com.latenighthack.deltalist.AbstractSoftList
+import com.latenighthack.deltalist.MutableSectionedDeltaList
+import com.latenighthack.deltalist.SoftValue
 import com.latenighthack.deltalist.Section
 import com.latenighthack.deltalist.SectionedChange
 import com.latenighthack.deltalist.SectionedDelta
@@ -11,6 +14,8 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertSame
 
 class MutableSectionedDeltaListTest {
 
@@ -77,5 +82,61 @@ class MutableSectionedDeltaListTest {
         }
 
         deltas.assertFlatOracle()
+    }
+
+    @Test
+    fun itemMutationsRejectPartialSectionsWithoutPublishingOrRequesting() = runTest {
+        var callbackCalls = 0
+        val edits: List<(MutableSectionedDeltaList<String, Int>) -> Unit> = listOf(
+            { it.appendItem(0, 4) },
+            { it.insertItem(0, 0, 4) },
+            { it.removeItem(0, 0) },
+            { it.setItem(0, 0, 4) },
+            { it.moveItem(0, 0, 1) },
+            { it.updateSection(0) { items -> callbackCalls++; items.add(4) } }
+        )
+        for (edit in edits) {
+            var requests = 0
+            val partial = object : AbstractSoftList<Int>() {
+                override val size = 3
+                override fun softGet(index: Int): SoftValue<Int>? = when (index) {
+                    0 -> SoftValue.Present(1)
+                    1 -> SoftValue.NotLoaded { requests++ }
+                    2 -> SoftValue.Present(3)
+                    else -> null
+                }
+            }
+            val source = mutableSectionedDeltaListOf(listOf(Section("A", partial)))
+            val initial = source.value
+            val deltas = collectDriven(source) {
+                assertFailsWith<IllegalStateException> { edit(source) }
+                advanceUntilIdle()
+            }
+            assertSame(initial, source.value)
+            assertSame(partial, source.value[0].items)
+            assertEquals(1, deltas.size)
+            assertEquals(0, requests)
+        }
+        assertEquals(0, callbackCalls)
+    }
+
+    @Test
+    fun rejectsAnEnormousUnloadedEstimateWithoutAllocatingOrMutating() {
+        var peeks = 0
+        var requests = 0
+        val partial = object : AbstractSoftList<Int>() {
+            override val size = Int.MAX_VALUE
+            override fun softGet(index: Int): SoftValue<Int> {
+                peeks++
+                return SoftValue.NotLoaded { requests++ }
+            }
+        }
+        val source = mutableSectionedDeltaListOf(listOf(Section("A", partial)))
+        val initial = source.value
+        assertFailsWith<IllegalStateException> { source.appendItem(0, 1) }
+        assertSame(initial, source.value)
+        assertSame(partial, source.value[0].items)
+        assertEquals(1, peeks)
+        assertEquals(0, requests)
     }
 }

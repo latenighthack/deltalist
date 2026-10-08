@@ -5,7 +5,9 @@ import kotlinx.coroutines.flow.FlowCollector
 
 /**
  * A conflated mutable holder. Each collector receives Reload initially and after missed
- * publications. Consecutive changes use running coordinates. Serialize writers; callbacks
+ * publications. Item mutations require a fully loaded section and fail without publishing
+ * if any position is unloaded; update callbacks are not invoked in that case.
+ * Consecutive changes use running coordinates. Serialize writers; callbacks
  * are not retried. Do not conflate or replay raw deltas downstream.
  */
 interface MutableSectionedDeltaList<S, T> : Flow<SectionedDelta<S, T>> {
@@ -80,7 +82,7 @@ internal class MutableSectionedDeltaListImpl<S, T>(
     override fun appendItem(sectionIndex: Int, item: T) {
         val current = state.value.sections.toMutableList()
         val section = current[sectionIndex]
-        val newItems = section.items.softLoadedItems().toMutableList()
+        val newItems = section.items.requireLoadedItems()
         val itemIndex = newItems.size
         newItems.add(item)
         current[sectionIndex] = section.copy(items = newItems.asSoftList())
@@ -90,7 +92,7 @@ internal class MutableSectionedDeltaListImpl<S, T>(
     override fun insertItem(sectionIndex: Int, itemIndex: Int, item: T) {
         val current = state.value.sections.toMutableList()
         val section = current[sectionIndex]
-        val newItems = section.items.softLoadedItems().toMutableList()
+        val newItems = section.items.requireLoadedItems()
         newItems.add(itemIndex, item)
         current[sectionIndex] = section.copy(items = newItems.asSoftList())
         state.value = SectionedDelta(current, SectionedChange.Items(sectionIndex, Mutation.Insert(itemIndex)))
@@ -99,7 +101,7 @@ internal class MutableSectionedDeltaListImpl<S, T>(
     override fun removeItem(sectionIndex: Int, itemIndex: Int) {
         val current = state.value.sections.toMutableList()
         val section = current[sectionIndex]
-        val newItems = section.items.softLoadedItems().toMutableList()
+        val newItems = section.items.requireLoadedItems()
         newItems.removeAt(itemIndex)
         current[sectionIndex] = section.copy(items = newItems.asSoftList())
         state.value = SectionedDelta(current, SectionedChange.Items(sectionIndex, Mutation.Remove(itemIndex)))
@@ -108,7 +110,7 @@ internal class MutableSectionedDeltaListImpl<S, T>(
     override fun setItem(sectionIndex: Int, itemIndex: Int, item: T) {
         val current = state.value.sections.toMutableList()
         val section = current[sectionIndex]
-        val newItems = section.items.softLoadedItems().toMutableList()
+        val newItems = section.items.requireLoadedItems()
         newItems[itemIndex] = item
         current[sectionIndex] = section.copy(items = newItems.asSoftList())
         state.value = SectionedDelta(current, SectionedChange.Items(sectionIndex, Mutation.Update(itemIndex)))
@@ -118,7 +120,7 @@ internal class MutableSectionedDeltaListImpl<S, T>(
         if (fromIndex == toIndex) return
         val current = state.value.sections.toMutableList()
         val section = current[sectionIndex]
-        val newItems = section.items.softLoadedItems().toMutableList()
+        val newItems = section.items.requireLoadedItems()
         val item = newItems.removeAt(fromIndex)
         newItems.add(toIndex, item)
         current[sectionIndex] = section.copy(items = newItems.asSoftList())
@@ -130,7 +132,7 @@ internal class MutableSectionedDeltaListImpl<S, T>(
     override fun updateSection(index: Int, block: (MutableList<T>) -> Unit) {
         val current = state.value.sections.toMutableList()
         val section = current[index]
-        val tracked = TrackedMutableList(section.items.softLoadedItems())
+        val tracked = TrackedMutableList(section.items.requireLoadedItems())
         block(tracked)
 
         val mutations = tracked.toMutations()
@@ -157,4 +159,18 @@ fun <S, T> mutableSectionedDeltaListOf(
 private fun <S, T> List<Section<S, T>>.publicationSnapshot(): List<Section<S, T>> = map { section ->
     val items = section.items
     if (items is FullSoftList<T>) section.copy(items = items.snapshot()) else section
+}
+
+/** Never turn a partial snapshot into a shorter, fully loaded publication. */
+private fun <T> SoftList<T>.requireLoadedItems(): MutableList<T> {
+    // Estimated sizes can be enormous even when the very first slot is unloaded.
+    val loaded = mutableListOf<T>()
+    for (index in 0 until size) {
+        val value = softGet(index)
+        check(value is SoftValue.Present) {
+            "Cannot mutate a section with unloaded items (position $index); reload it with complete items first"
+        }
+        loaded.add(value.value)
+    }
+    return loaded
 }
