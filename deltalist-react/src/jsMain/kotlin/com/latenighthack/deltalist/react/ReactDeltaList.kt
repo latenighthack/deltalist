@@ -6,6 +6,7 @@ import com.latenighthack.deltalist.acquireItemOrGet
 import com.latenighthack.deltalist.LazyList
 import com.latenighthack.deltalist.SoftList
 import com.latenighthack.deltalist.SoftValue
+import com.latenighthack.deltalist.Stable
 import com.latenighthack.deltalist.acquireOrGet
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -88,6 +89,13 @@ internal class ReactDeltaListController(
         if (mappedValue == null) return
         val value = mappedValue.asDynamic()
         if (jsTypeOf(value) != "object" || value == null || value.key != js("undefined")) return
+
+        if (rawValue is Stable) {
+            // StableItem wrappers may be recreated on every snapshot/read. Their
+            // logical ID, not wrapper identity, must carry React state across updates.
+            value.key = "stable:${rawValue.stableId}"
+            return
+        }
 
         val raw = rawValue.asDynamic()
         if ((jsTypeOf(raw) == "object" || jsTypeOf(raw) == "function") && raw != null) {
