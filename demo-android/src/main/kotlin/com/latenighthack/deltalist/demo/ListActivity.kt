@@ -302,7 +302,8 @@ private class TickingItemAdapter(
 ) : FlowDeltaAdapter<StableItem<TickingItem>, Int, TickingItemAdapter.TickingItemViewHolder>(
     deltaList,
     // Clean API: access stableItem.value directly (auto-acquired)
-    flowAccessor = { stableItem -> stableItem.value.tickCount }
+    flowAccessor = { stableItem -> stableItem.value.tickCount },
+    stableIds = true,
 ) {
     // Track ticking items to stop them when flow stops
     private val tickingItems = mutableMapOf<TickingItemViewHolder, TickingItem>()

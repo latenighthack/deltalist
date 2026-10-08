@@ -71,7 +71,10 @@ fun ItemList(items: DeltaList<Item>) {
 
 Extend `DeltaAdapter<T, VH>` (`deltalist-android-recyclerview`); it applies deltas
 as efficient adapter notifications. Read rows with `getItem(position)` and start
-collection with `bind(owner)`.
+collection with `bind(owner)`. For `Stable` or `StableItem` rows, pass
+`stableIds = true` to the adapter constructor (or call `setHasStableIds(true)`
+before attachment). Asynchronous data cannot enable stable IDs after RecyclerView
+registers its observer.
 
 ```kotlin
 class ItemAdapter(items: DeltaList<Item>) : DeltaAdapter<Item, ItemAdapter.VH>(items) {

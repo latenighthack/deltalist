@@ -30,9 +30,11 @@ import kotlinx.coroutines.launch
  * Delta mutations are automatically applied as efficient RecyclerView notifications.
  *
  * ## Stable IDs
- * When the item type is [StableItem], stable IDs are automatically enabled and
- * [getItemId] returns the stable ID. Otherwise, override [getItemId] manually
- * and call [setHasStableIds(true)] if you need stable IDs.
+ * Pass `stableIds = true` for items implementing [Stable] (including [StableItem]).
+ * This configures RecyclerView before any observers attach, including when the first
+ * item arrives asynchronously. Alternatively, call `setHasStableIds(true)` before attachment.
+ * Automatic detection is retained only when the first loaded item arrives before observers
+ * register; attached adapters stay in their configured mode. Override [getItemId] for custom IDs.
  *
  * ## Lazy List Support
  * When the underlying list is a [LazyList] (e.g., from [lazyMap().withStableIds()]),
@@ -48,7 +50,7 @@ import kotlinx.coroutines.launch
  * Example:
  * ```kotlin
  * class MyAdapter(deltaList: DeltaList<StableItem<MyData>>) :
- *     DeltaAdapter<StableItem<MyData>, MyViewHolder>(deltaList) {
+ *     DeltaAdapter<StableItem<MyData>, MyViewHolder>(deltaList, stableIds = true) {
  *
  *     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MyViewHolder { ... }
  *
@@ -64,14 +66,17 @@ import kotlinx.coroutines.launch
  * val items = source.lazyMap { transform(it) }.withStableIds()
  *
  * class MyAdapter(deltaList: DeltaList<StableItem<TransformedData>>) :
- *     DeltaAdapter<StableItem<TransformedData>, MyViewHolder>(deltaList) {
+ *     DeltaAdapter<StableItem<TransformedData>, MyViewHolder>(deltaList, stableIds = true) {
  *     // ... lifecycle is managed automatically
  * }
  * ```
  */
-abstract class DeltaAdapter<T, VH : RecyclerView.ViewHolder>(
-    private val deltaList: DeltaList<T>
+abstract class DeltaAdapter<T, VH : RecyclerView.ViewHolder> @JvmOverloads constructor(
+    private val deltaList: DeltaList<T>,
+    stableIds: Boolean = false,
 ) : RecyclerView.Adapter<VH>() {
+
+    init { setHasStableIds(stableIds) }
 
     /**
      * The current list of items. Updated automatically when deltas are received.
@@ -176,7 +181,7 @@ abstract class DeltaAdapter<T, VH : RecyclerView.ViewHolder>(
                 is Stable -> StableIdMode.Stable
                 else -> StableIdMode.None
             }
-            if (stableIdMode == StableIdMode.Stable) {
+            if (stableIdMode == StableIdMode.Stable && !hasStableIds() && !hasObservers()) {
                 setHasStableIds(true)
             }
         }
@@ -312,12 +317,8 @@ abstract class DeltaAdapter<T, VH : RecyclerView.ViewHolder>(
      * Override this method if you need custom stable ID logic.
      */
     override fun getItemId(position: Int): Long {
-        return when (stableIdMode) {
-            StableIdMode.Stable ->
-                ((items.softGet(position) as? SoftValue.Present)?.value as? Stable)
-                    ?.stableId?.toLong() ?: RecyclerView.NO_ID
-            else -> RecyclerView.NO_ID
-        }
+        return ((items.softGet(position) as? SoftValue.Present)?.value as? Stable)
+            ?.stableId?.toLong() ?: RecyclerView.NO_ID
     }
 
     /**

@@ -56,6 +56,15 @@ abstract class FlowDeltaAdapter<T, S, VH : RecyclerView.ViewHolder>(
     private val flowAccessor: (T) -> Flow<S>
 ) : DeltaAdapter<T, VH>(deltaList) {
 
+    /** Configure stable IDs before attaching this adapter to RecyclerView. */
+    constructor(
+        deltaList: DeltaList<T>,
+        flowAccessor: (T) -> Flow<S>,
+        stableIds: Boolean,
+    ) : this(deltaList, flowAccessor) {
+        setHasStableIds(stableIds)
+    }
+
     private var lifecycleOwner: LifecycleOwner? = null
 
     // Track active flow jobs per ViewHolder
