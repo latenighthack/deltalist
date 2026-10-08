@@ -986,24 +986,26 @@ public class StableDeltaCollectionDataSource<T: AnyObject>: NSObject, UICollecti
 
     public func bind<S: AsyncSequence>(to stream: S) where S.Element == Delta<T> {
         unbind()
-        task = Task { @MainActor in
+        task = Task { @MainActor [weak self] in
             do {
                 for try await delta in stream {
                     if Task.isCancelled { break }
+                    guard let self else { break }
                     self.applyDelta(delta)
                 }
             } catch {
-                self.onError?(error)
+                if !Task.isCancelled && !(error is CancellationError) { self?.onError?(error) }
             }
         }
     }
 
     public func bind(erased stream: some AsyncSequence) {
         unbind()
-        task = Task { @MainActor in
+        task = Task { @MainActor [weak self] in
             do {
                 for try await value in stream {
                     if Task.isCancelled { break }
+                    guard let self else { break }
                     if let delta = value as? Delta<T> {
                         self.applyDelta(delta)
                     } else if let delta = value as? Delta<AnyObject> {
@@ -1014,7 +1016,7 @@ public class StableDeltaCollectionDataSource<T: AnyObject>: NSObject, UICollecti
                     }
                 }
             } catch {
-                self.onError?(error)
+                if !Task.isCancelled && !(error is CancellationError) { self?.onError?(error) }
             }
         }
     }

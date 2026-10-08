@@ -69,17 +69,17 @@ public class ItemStateObserver<Value>: ObservableObject {
         self.startFlow = { [weak self] in
             guard let self = self else { return }
             self.task = Task { @MainActor [weak self] in
-                guard let self = self else { return }
                 do {
                     for try await newValue in flow() {
                         if Task.isCancelled { break }
+                        guard let self else { break }
                         // Try direct cast first, then try common conversions
                         if let v = newValue as? Value {
                             self.value = v
                         }
                     }
                 } catch {
-                    self.onError?(error)
+                    if !Task.isCancelled && !(error is CancellationError) { self?.onError?(error) }
                 }
             }
         }

@@ -148,4 +148,43 @@ final class AdapterRegressionTests: XCTestCase {
         await eventually("reload refreshes surviving identifiers") { fixture.rendered(path) == "reloaded" }
     }
 
+
+    func testStableCollectorStopsWhenItsOwnerIsReleased() async {
+        typealias Delta = DeltaListCore.Delta<StableRow>
+        var continuation: AsyncStream<Delta>.Continuation!
+        var terminated = false
+        let stream = AsyncStream<Delta> { continuation = $0 }
+        continuation.onTermination = { _ in Task { @MainActor in terminated = true } }
+        let fixture = CollectionFixture()
+        defer { fixture.close() }
+        #if canImport(UIKit)
+        var dataSource: DeltaListCore.StableDeltaCollectionDataSource<StableRow>? = .init(
+            collectionView: fixture.collection, stableIdExtractor: { $0.id },
+            cellProvider: { _, path, value in fixture.item(path, text: value.title) })
+        #else
+        var dataSource: DeltaListCore.StableDeltaNSCollectionDataSource<StableRow>? = .init(
+            collectionView: fixture.collection, stableIdExtractor: { $0.id },
+            itemProvider: { _, path, value in fixture.item(path, text: value.title) })
+        #endif
+        weak var weakDataSource = dataSource
+        dataSource?.bind(to: stream)
+        continuation.yield(Delta(items: [StableRow(1, "loaded")], change: Change.Reload.shared))
+        await eventually("stable collector reached its source") { dataSource?.currentItems.count == 1 }
+        dataSource = nil
+        await eventually("stable owner deallocated and cancelled its source") { weakDataSource == nil && terminated }
+    }
+
+    func testItemStateCollectorStopsWhenItsOwnerIsReleased() async {
+        var continuation: AsyncStream<Int>.Continuation!
+        var terminated = false
+        let stream = AsyncStream<Int> { continuation = $0 }
+        continuation.onTermination = { _ in Task { @MainActor in terminated = true } }
+        var observer: DeltaListCore.ItemStateObserver<Int>? = .init(initial: -1, flow: { stream })
+        weak var weakObserver = observer
+        continuation.yield(7)
+        await eventually("item observer reached its source") { observer?.value == 7 }
+        observer = nil
+        await eventually("item observer deallocated and cancelled its source") { weakObserver == nil && terminated }
+    }
+
 }
