@@ -123,98 +123,43 @@ internal class FilteredList<T>(
 }
 
 /**
- * Adjust mutations to handle estimated size placeholders correctly.
- *
- * This function handles three cases:
- * 1. Convert Inserts within old estimated size to Updates (filling placeholders)
- * 2. Emit Remove mutations if estimated size shrinks (excess placeholders removed)
- * 3. Emit Insert mutations if estimated size grows beyond item coverage (new placeholders)
- *
- * @param mutations The raw mutations from translateMutations
- * @param previousLoadedCount Number of loaded (non-placeholder) items before the change
- * @param previousEstimatedSize Total size including placeholders before the change
- * @param newLoadedCount Number of loaded items after the change
- * @param newEstimatedSize Total size including placeholders after the change
+ * Apply loaded-row mutations in running coordinates, consuming trailing placeholders only
+ * when rows are appended at the loaded boundary. An insertion before retained rows must
+ * shift those rows; replacing a placeholder there would silently overwrite their values.
  */
 private fun adjustMutationsForPlaceholders(
     mutations: List<Mutation>,
     previousLoadedCount: Int,
     previousEstimatedSize: Int,
-    newLoadedCount: Int,
     newEstimatedSize: Int
 ): List<Mutation> {
     val result = mutableListOf<Mutation>()
-
-    // Step 1: Process mutations - convert Inserts within old estimated to Updates
-    if (previousEstimatedSize > previousLoadedCount) {
-        for (mutation in mutations) {
-            when (mutation) {
-                is Mutation.Insert -> {
-                    // Inserts at positions within the old estimated size are filling placeholders
-                    if (mutation.index < previousEstimatedSize) {
-                        // How many of these "inserts" are actually replacing placeholders?
-                        val placeholderEnd = previousEstimatedSize
-                        val updateEnd = minOf(mutation.index + mutation.count, placeholderEnd)
-                        val updateCount = updateEnd - mutation.index
-
-                        if (updateCount > 0) {
-                            result.add(Mutation.Update(mutation.index, updateCount))
-                        }
-
-                        // Any inserts beyond the old estimated size are true inserts
-                        val insertCount = mutation.count - updateCount
-                        if (insertCount > 0) {
-                            result.add(Mutation.Insert(updateEnd, insertCount))
-                        }
-                    } else {
-                        // Insert is entirely beyond old estimated size - true insert
-                        result.add(mutation)
-                    }
-                }
-                else -> result.add(mutation)
-            }
-        }
-    } else {
-        // No placeholders existed before - keep mutations as-is
-        result.addAll(mutations)
-    }
-
-    // Step 2: Handle placeholder count changes
-    // Calculate how the total size needs to change after accounting for item mutations
-    //
-    // The mutations in result already handle:
-    // - Updates: placeholders converted to real items (don't change total size)
-    // - Inserts: new items beyond estimated size (increase total size)
-    //
-    // We need to emit Remove/Insert for the remaining size difference.
-    //
-    // Example: 50 → 30 with 1 new loaded item
-    // - Update(5, 1): placeholder at 5 becomes real (size still 50)
-    // - Need Remove(30, 20) to shrink from 50 to 30
-
-    // Count how many positions the current mutations add/remove
-    var mutationSizeChange = 0
-    for (mutation in result) {
+    var loadedCount = previousLoadedCount
+    var size = previousEstimatedSize
+    for (mutation in mutations) {
         when (mutation) {
-            is Mutation.Insert -> mutationSizeChange += mutation.count
-            is Mutation.Remove -> mutationSizeChange -= mutation.count
-            else -> {} // Update doesn't change size
+            is Mutation.Insert -> {
+                val filled = if (mutation.index == loadedCount) {
+                    minOf(mutation.count, (size - loadedCount).coerceAtLeast(0))
+                } else 0
+                if (filled > 0) result.add(Mutation.Update(mutation.index, filled))
+                val inserted = mutation.count - filled
+                if (inserted > 0) result.add(Mutation.Insert(mutation.index + filled, inserted))
+                loadedCount += mutation.count
+                size += inserted
+            }
+            is Mutation.Remove -> {
+                result.add(mutation)
+                loadedCount -= mutation.count
+                size -= mutation.count
+            }
+            else -> result.add(mutation)
         }
     }
 
-    // Calculate net size change needed
-    val totalSizeChange = newEstimatedSize - previousEstimatedSize
-    val remainingSizeChange = totalSizeChange - mutationSizeChange
-
-    if (remainingSizeChange < 0) {
-        // Need to remove positions (excess placeholders)
-        val removeCount = -remainingSizeChange
-        result.add(Mutation.Remove(newEstimatedSize, removeCount))
-    } else if (remainingSizeChange > 0) {
-        // Need to add positions (new placeholders)
-        result.add(Mutation.Insert(previousEstimatedSize + mutationSizeChange, remainingSizeChange))
-    }
-
+    // The loaded prefix now has the correct content and identity. Resize only its tail.
+    if (size > newEstimatedSize) result.add(Mutation.Remove(newEstimatedSize, size - newEstimatedSize))
+    if (size < newEstimatedSize) result.add(Mutation.Insert(size, newEstimatedSize - size))
     return result
 }
 
@@ -263,7 +208,6 @@ fun <T> DeltaList<T>.filterItems(predicate: (T) -> Boolean): DeltaList<T> = flow
                     )
                     // Create filtered list to get new estimated size
                     val newFilteredList = FilteredList(sourceItems, filteredIndicesList, sourceLoadedCount, leadingUnloaded)
-                    val newLoadedCount = currentFilteredIndices.size
                     val newEstimatedSize = newFilteredList.size
 
                     // Adjust mutations: handle placeholder transitions and size changes
@@ -271,7 +215,6 @@ fun <T> DeltaList<T>.filterItems(predicate: (T) -> Boolean): DeltaList<T> = flow
                         rawMutations,
                         prevLoadedCount,
                         previousFilteredSize,
-                        newLoadedCount,
                         newEstimatedSize
                     )
                     if (mutations.isEmpty()) {
@@ -483,7 +426,6 @@ fun <T> DeltaList<T>.filterItemsDynamic(
                             )
                             // Create filtered list to get new estimated size
                             val newFilteredList = createFilteredList(sourceItems, filteredIndicesList, loadedCount, leadingUnloaded)
-                            val newLoadedCount = currentFilteredIndices.size
                             val newEstimatedSize = newFilteredList.size
 
                             // Adjust mutations: handle placeholder transitions and size changes
@@ -491,7 +433,6 @@ fun <T> DeltaList<T>.filterItemsDynamic(
                                 rawMutations,
                                 prevLoadedCount,
                                 previousFilteredSize,
-                                newLoadedCount,
                                 newEstimatedSize
                             )
                             if (mutations.isEmpty()) {
