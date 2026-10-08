@@ -102,13 +102,13 @@ public class StableDeltaNSCollectionDataSource<T: AnyObject>: NSObject, NSCollec
     private func applyDelta(_ delta: Delta<T>) {
         let loadedItems = delta.loadedItems()
         items = loadedItems.compactMap { $0 as? T }
-        rebuildSnapshot(animating: !(delta.change is Change.Reload))
+        rebuildSnapshot(change: delta.change)
     }
 
     private func applyDeltaErased(_ delta: Delta<AnyObject>) {
         let loadedItems = delta.loadedItems()
         items = loadedItems.compactMap { $0 as? T }
-        rebuildSnapshot(animating: !(delta.change is Change.Reload))
+        rebuildSnapshot(change: delta.change)
     }
 
     private func applyDeltaAny(_ delta: AnyObject) {
@@ -119,24 +119,40 @@ public class StableDeltaNSCollectionDataSource<T: AnyObject>: NSObject, NSCollec
             if let imp = DeltaIMPCache.shared.imp(for: delta, DeltaSelector.loadedItems),
                let loadedArray = unsafeBitCast(imp, to: Fn.self)(delta, DeltaSelector.loadedItems) as? [AnyObject] {
                 items = loadedArray.compactMap { $0 as? T }
-                rebuildSnapshot(animating: false)
+                rebuildSnapshot(change: nil)
             }
             return
         }
 
         let loadedItems = deltaBase.loadedItems()
         items = loadedItems.compactMap { $0 as? T }
-        rebuildSnapshot(animating: !(deltaBase.change is Change.Reload))
+        rebuildSnapshot(change: deltaBase.change)
     }
 
-    private func rebuildSnapshot(animating: Bool) {
+    private func rebuildSnapshot(change: Change?) {
+        let previous = itemsByStableId
         itemsByStableId = Dictionary(uniqueKeysWithValues: items.map { (stableIdExtractor($0), $0) })
         onItemsChanged?(items)
 
+        let identifiers = items.map(stableIdExtractor)
+        let existing = Set(diffableDataSource.snapshot().itemIdentifiers)
+        var refresh = Set(identifiers.filter {
+            existing.contains($0) && (change == nil || change is Change.Reload || previous[$0] !== itemsByStableId[$0])
+        })
+        if let mutations = change as? Change.Mutations {
+            for case let update as Mutation.Update in mutations.operations {
+                let start = Int(update.index), count = Int(update.count)
+                guard start >= 0, count >= 0, start + count <= identifiers.count else { continue }
+                refresh.formUnion(identifiers[start..<start + count].filter { existing.contains($0) })
+            }
+        }
         var snapshot = NSDiffableDataSourceSnapshot<Int, Int32>()
         snapshot.appendSections([0])
-        snapshot.appendItems(items.map { stableIdExtractor($0) }, toSection: 0)
-        diffableDataSource.apply(snapshot, animatingDifferences: animating)
+        snapshot.appendItems(identifiers, toSection: 0)
+        // Identifier equality describes identity, not content equality. Explicit updates also
+        // refresh mutable models whose object identity has not changed.
+        snapshot.reloadItems(Array(refresh))
+        diffableDataSource.apply(snapshot, animatingDifferences: change != nil && !(change is Change.Reload))
     }
 
     // MARK: - Item Access

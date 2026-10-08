@@ -1025,66 +1025,50 @@ public class StableDeltaCollectionDataSource<T: AnyObject>: NSObject, UICollecti
     }
 
     private func applyDelta(_ delta: Delta<T>) {
-        // Use loadedItems() to avoid bridging catastrophe
-        let loadedItems = delta.loadedItems()
-        items = loadedItems.compactMap { $0 as? T }
-        itemsByStableId = Dictionary(uniqueKeysWithValues: items.map { (stableIdExtractor($0), $0) })
-        onItemsChanged?(items)
-
-        var snapshot = NSDiffableDataSourceSnapshot<Int, Int32>()
-        snapshot.appendSections([0])
-        snapshot.appendItems(items.map { stableIdExtractor($0) }, toSection: 0)
-
-        let animating = !(delta.change is Change.Reload)
-        diffableDataSource.apply(snapshot, animatingDifferences: animating)
+        items = delta.loadedItems().compactMap { $0 as? T }
+        rebuildSnapshot(change: delta.change)
     }
 
     private func applyDeltaErased(_ delta: Delta<AnyObject>) {
-        // Use loadedItems() to avoid bridging catastrophe
-        let loadedItems = delta.loadedItems()
-        items = loadedItems.compactMap { $0 as? T }
-        itemsByStableId = Dictionary(uniqueKeysWithValues: items.map { (stableIdExtractor($0), $0) })
-        onItemsChanged?(items)
-
-        var snapshot = NSDiffableDataSourceSnapshot<Int, Int32>()
-        snapshot.appendSections([0])
-        snapshot.appendItems(items.map { stableIdExtractor($0) }, toSection: 0)
-
-        let animating = !(delta.change is Change.Reload)
-        diffableDataSource.apply(snapshot, animatingDifferences: animating)
+        items = delta.loadedItems().compactMap { $0 as? T }
+        rebuildSnapshot(change: delta.change)
     }
 
     private func applyDeltaAny(_ delta: AnyObject) {
-        // Cross-module fallback: access Delta properties directly
-        // Delta is a Kotlin class, so we can call its methods
-        guard let deltaBase = delta as? Delta<NSObject> else {
-            // Last resort: a Delta vended by another SKIE framework — call loadedItems() by selector.
-            typealias Fn = @convention(c) (AnyObject, Selector) -> NSArray?
-            if let imp = DeltaIMPCache.shared.imp(for: delta, DeltaSelector.loadedItems),
-               let loadedArray = unsafeBitCast(imp, to: Fn.self)(delta, DeltaSelector.loadedItems) as? [AnyObject] {
-                items = loadedArray.compactMap { $0 as? T }
-                itemsByStableId = Dictionary(uniqueKeysWithValues: items.map { (stableIdExtractor($0), $0) })
-                onItemsChanged?(items)
-
-                var snapshot = NSDiffableDataSourceSnapshot<Int, Int32>()
-                snapshot.appendSections([0])
-                snapshot.appendItems(items.map { stableIdExtractor($0) }, toSection: 0)
-                diffableDataSource.apply(snapshot, animatingDifferences: false)
-            }
-            return
+        if let deltaBase = delta as? Delta<NSObject> {
+            items = deltaBase.loadedItems().compactMap { $0 as? T }
+            rebuildSnapshot(change: deltaBase.change)
+        } else {
+            // Cross-framework changes have distinct Obj-C types; conservatively refresh survivors.
+            items = loadedItemsViaRuntime(delta).compactMap { $0 as? T }
+            rebuildSnapshot(change: nil)
         }
+    }
 
-        let loadedItems = deltaBase.loadedItems()
-        items = loadedItems.compactMap { $0 as? T }
+    private func rebuildSnapshot(change: Change?) {
+        let previous = itemsByStableId
         itemsByStableId = Dictionary(uniqueKeysWithValues: items.map { (stableIdExtractor($0), $0) })
         onItemsChanged?(items)
 
+        let identifiers = items.map(stableIdExtractor)
+        let existing = Set(diffableDataSource.snapshot().itemIdentifiers)
+        var refresh = Set(identifiers.filter {
+            existing.contains($0) && (change == nil || change is Change.Reload || previous[$0] !== itemsByStableId[$0])
+        })
+        if let mutations = change as? Change.Mutations {
+            for case let update as Mutation.Update in mutations.operations {
+                let start = Int(update.index), count = Int(update.count)
+                guard start >= 0, count >= 0, start + count <= identifiers.count else { continue }
+                refresh.formUnion(identifiers[start..<start + count].filter { existing.contains($0) })
+            }
+        }
         var snapshot = NSDiffableDataSourceSnapshot<Int, Int32>()
         snapshot.appendSections([0])
-        snapshot.appendItems(items.map { stableIdExtractor($0) }, toSection: 0)
-
-        let animating = !(deltaBase.change is Change.Reload)
-        diffableDataSource.apply(snapshot, animatingDifferences: animating)
+        snapshot.appendItems(identifiers, toSection: 0)
+        // Identifier equality describes identity, not content equality. Explicit updates also
+        // refresh mutable models whose object identity has not changed.
+        snapshot.reloadItems(Array(refresh))
+        diffableDataSource.apply(snapshot, animatingDifferences: change != nil && !(change is Change.Reload))
     }
 
     public func item(at indexPath: IndexPath) -> T? {

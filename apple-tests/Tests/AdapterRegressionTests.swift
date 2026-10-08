@@ -72,6 +72,12 @@ private final class CollectionFixture {
     #endif
 }
 
+private final class StableRow: NSObject {
+    let id: Int32
+    var title: String
+    init(_ id: Int32, _ title: String) { self.id = id; self.title = title }
+}
+
 @MainActor
 final class AdapterRegressionTests: XCTestCase {
     private func eventually(_ message: String, file: StaticString = #filePath, line: UInt = #line,
@@ -111,4 +117,35 @@ final class AdapterRegressionTests: XCTestCase {
         }
         XCTAssertEqual((0..<3).map { fixture.collection.numberOfItems(inSection: $0) }, [3, 2, 1])
     }
+
+    func testStableIdentifiersRefreshReplacementAndInPlaceUpdates() async {
+        typealias Delta = DeltaListCore.Delta<StableRow>
+        var continuation: AsyncStream<Delta>.Continuation!
+        let stream = AsyncStream<Delta> { continuation = $0 }
+        let fixture = CollectionFixture()
+        #if canImport(UIKit)
+        let dataSource = DeltaListCore.StableDeltaCollectionDataSource<StableRow>(
+            collectionView: fixture.collection, stableIdExtractor: { $0.id },
+            cellProvider: { _, path, value in fixture.item(path, text: value.title) })
+        #else
+        let dataSource = DeltaListCore.StableDeltaNSCollectionDataSource<StableRow>(
+            collectionView: fixture.collection, stableIdExtractor: { $0.id },
+            itemProvider: { _, path, value in fixture.item(path, text: value.title) })
+        #endif
+        defer { dataSource.unbind(); fixture.close() }
+        dataSource.bind(to: stream)
+        let path = IndexPath(item: 0, section: 0)
+        continuation.yield(Delta(items: [StableRow(1, "before")], change: Change.Reload.shared))
+        await eventually("initial stable row rendered") { fixture.rendered(path) == "before" }
+        let replacement = StableRow(1, "after")
+        continuation.yield(Delta(items: [replacement], change: Change.Mutations(operations: [Mutation.Update(index: 0, count: 1)])))
+        await eventually("replacement with same stable identifier rendered") { fixture.rendered(path) == "after" }
+        replacement.title = "in-place"
+        continuation.yield(Delta(items: [replacement], change: Change.Mutations(operations: [Mutation.Update(index: 0, count: 1)])))
+        await eventually("explicit update refreshes the same object") { fixture.rendered(path) == "in-place" }
+        replacement.title = "reloaded"
+        continuation.yield(Delta(items: [replacement], change: Change.Reload.shared))
+        await eventually("reload refreshes surviving identifiers") { fixture.rendered(path) == "reloaded" }
+    }
+
 }
