@@ -207,6 +207,36 @@ class TrayControllerTest {
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     @Test
+    fun replacement_switches_state_source_and_resets_initial_state() = runTest {
+        class StatefulBox(initial: String) { val state = MutableStateFlow<Any?>(initial) }
+        val sink = FakeSink<Wrapped<StatefulBox>, StatefulBox>()
+        val old = StatefulBox("old")
+        val fresh = StatefulBox("new")
+        val tray = controller(sink, scope = backgroundScope,
+            stateAccessor = { it.state }, stateInitial = { it.state.value })
+
+        tray.applyDelta(reload(listOf(Wrapped(1, old))))
+        runCurrent()
+        assertEquals(1, old.state.subscriptionCount.value)
+
+        tray.applyDelta(mutations(listOf(Wrapped(1, fresh)), Mutation.Update(0)))
+        assertEquals("new", sink.states[1])
+        runCurrent()
+        assertEquals(0, old.state.subscriptionCount.value)
+        assertEquals(1, fresh.state.subscriptionCount.value)
+
+        fresh.state.value = "updated"
+        advanceTimeBy(130); runCurrent()
+        assertEquals("updated", sink.states[1])
+        val posts = sink.postCount
+        old.state.value = "stale"
+        advanceTimeBy(130); runCurrent()
+        assertEquals(posts, sink.postCount)
+        assertEquals("updated", sink.states[1])
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
     fun item_state_emissions_repost_and_coalesce_under_rate_limit() = runTest {
         val sink = FakeSink<Wrapped<Box>, Box>()
         val state = MutableStateFlow<Any?>(0)

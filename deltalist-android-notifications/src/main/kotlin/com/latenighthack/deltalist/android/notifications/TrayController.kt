@@ -83,11 +83,17 @@ internal class TrayController<E : Stable, T>(
                 startStateJob(entry)
             } else {
                 val valueChanged = existing.value !== value
+                if (valueChanged) {
+                    existing.stateJob?.cancel()
+                    existing.stateJob = null
+                    existing.state = stateInitial?.invoke(value)
+                }
                 existing.value = value
                 rebuilt[id] = existing
                 if (valueChanged || forceRepost) {
                     sink.post(id, existing.value, existing.state)
                 }
+                if (valueChanged) startStateJob(existing)
             }
         }
         entries.clear()

@@ -170,6 +170,7 @@ final class TrayEntry {
     var item: AnyObject
     var state: Any?
     var stateTask: Task<Void, Never>?
+    var stateGeneration = UUID()
     var lastPostAt: Date?
     var pendingFlush: Task<Void, Never>?
     var pendingState: Any?
@@ -229,10 +230,24 @@ final class TrayController {
             let id = stableId(item)
             if let existing = entries[id] {
                 let valueChanged = shouldRepost(existing.item, item)
+                let replaced = existing.item !== item
+                let oldState = existing.state
+                if replaced {
+                    // Ownership of the observation follows the raw item, independently of the
+                    // caller's value-equality policy for snapshot reposts.
+                    existing.stateGeneration = UUID()
+                    existing.stateTask?.cancel()
+                    existing.pendingFlush?.cancel()
+                    existing.pendingFlush = nil
+                    existing.pendingState = nil
+                    existing.state = stateInitial?(item)
+                    existing.lastPostAt = nil
+                }
                 existing.item = item
-                if valueChanged || isReload {
+                if valueChanged || isReload || (replaced && !statesEqual(oldState, existing.state)) {
                     sink.post(id, item, existing.state)
                 }
+                if replaced { startStateTask(existing) }
             } else {
                 let entry = TrayEntry(stableId: id, item: item, state: stateInitial?(item))
                 entries[id] = entry
@@ -264,8 +279,10 @@ final class TrayController {
 
     private func startStateTask(_ entry: TrayEntry) {
         guard let stateSubscribe = stateSubscribe else { return }
+        let generation = UUID()
+        entry.stateGeneration = generation
         entry.stateTask = stateSubscribe(entry.item) { [weak self, weak entry] newState in
-            guard let self = self, let entry = entry else { return }
+            guard let self = self, let entry = entry, entry.stateGeneration == generation else { return }
             self.onState(entry, newState)
         }
     }
