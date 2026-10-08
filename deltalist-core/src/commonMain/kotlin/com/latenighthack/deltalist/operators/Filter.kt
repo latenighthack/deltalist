@@ -690,33 +690,22 @@ private fun <T> translateMutations(
             }
 
             is Mutation.Move -> {
-                // Handle move as remove + insert for simplicity
-                // This preserves correctness even if not optimal for animations
                 val wasInFilter = mutation.fromIndex in workingFilteredIndices
+                val fromFilteredIndex = sourceIndexToFilteredIndex(mutation.fromIndex, workingFilteredIndices)
+                workingFilteredIndices.remove(mutation.fromIndex)
+
+                // Even a filtered-out item moves the source coordinates of retained items.
+                // Keep that running index space current for subsequent operations in this delta.
+                workingFilteredIndices = workingFilteredIndices.map { index ->
+                    val afterRemove = if (index > mutation.fromIndex) index - 1 else index
+                    if (afterRemove >= mutation.toIndex) afterRemove + 1 else afterRemove
+                }.toMutableSet()
 
                 if (wasInFilter) {
-                    val fromFilteredIndex = sourceIndexToFilteredIndex(mutation.fromIndex, workingFilteredIndices)
-                    workingFilteredIndices.remove(mutation.fromIndex)
-
-                    // Adjust indices for the removal
-                    workingFilteredIndices = workingFilteredIndices.map { idx ->
-                        if (idx > mutation.fromIndex) idx - 1 else idx
-                    }.toMutableSet()
-
-                    // Move's toIndex is already a post-removal running coordinate (the applier
-                    // does removeAt(from) then add(to)), so it indexes the working source space
-                    // directly — no off-by-one adjustment.
-                    val adjustedToIndex = mutation.toIndex
-
-                    workingFilteredIndices = workingFilteredIndices.map { idx ->
-                        if (idx >= adjustedToIndex) idx + 1 else idx
-                    }.toMutableSet()
-
-                    workingFilteredIndices.add(adjustedToIndex)
-                    val toFilteredIndex = sourceIndexToFilteredIndex(adjustedToIndex, workingFilteredIndices)
-
+                    workingFilteredIndices.add(mutation.toIndex)
+                    val toFilteredIndex = sourceIndexToFilteredIndex(mutation.toIndex, workingFilteredIndices)
                     if (fromFilteredIndex != toFilteredIndex) {
-                        result.add(Mutation.Move(fromFilteredIndex, toFilteredIndex, 1))
+                        result.add(Mutation.Move(fromFilteredIndex, toFilteredIndex))
                     }
                 }
             }
