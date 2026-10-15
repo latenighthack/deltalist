@@ -25,11 +25,25 @@ private struct NotifierRegressionTests {
         print("NotifierRegressionTests: 4 passed")
     }
 
+    // Sleeping for a fixed interval can resume the test before a delayed flush task has even
+    // started its timer on a busy CI executor. Wait for the observable result instead.
+    @MainActor private static func eventually(
+        _ message: String,
+        _ condition: () -> Bool
+    ) async {
+        let deadline = ProcessInfo.processInfo.systemUptime + 5
+        while !condition(), ProcessInfo.processInfo.systemUptime < deadline {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        precondition(condition(), message)
+    }
+
     @MainActor private static func testThrottlePublishesLatestState() async {
         let fixture = StateFixture()
         fixture.emit(1); fixture.emit(2); fixture.emit(3)
-        try? await Task.sleep(nanoseconds: 250_000_000)
-        precondition(fixture.posts == [0, 1, 3], "Trailing flush must publish the latest emission")
+        await eventually("Trailing flush must publish the latest emission") {
+            fixture.posts == [0, 1, 3]
+        }
         fixture.controller.stop()
     }
 
@@ -44,8 +58,9 @@ private struct NotifierRegressionTests {
     @MainActor private static func testNilCanBeTheLatestState() async {
         let fixture = StateFixture()
         fixture.emit(1); fixture.emit(2); fixture.emit(nil)
-        try? await Task.sleep(nanoseconds: 250_000_000)
-        precondition(fixture.posts == [0, 1, nil], "A nil state is a value, not an absent pending emission")
+        await eventually("A nil state is a value, not an absent pending emission") {
+            fixture.posts == [0, 1, nil]
+        }
         fixture.controller.stop()
     }
 
@@ -78,8 +93,9 @@ private struct NotifierRegressionTests {
         precondition(posts.last?.0 === replacement && posts.last?.1 == 10, "Replacement must use its own initial state")
         emitters[ObjectIdentifier(old)]?(99) // A cancelled, noncooperative old producer.
         emitters[ObjectIdentifier(replacement)]?(11)
-        try? await Task.sleep(nanoseconds: 250_000_000)
-        precondition(posts.last?.0 === replacement && posts.last?.1 == 11, "Only the new item may drive replacement state")
+        await eventually("Replacement must cancel the old state stream and publish its own state") {
+            cancellations == 1 && posts.last?.0 === replacement && posts.last?.1 == 11
+        }
         precondition(!posts.contains { $0.1 == 99 }, "Late emissions from the cancelled source must be rejected")
         precondition(cancellations == 1, "Replacement must cancel the old state stream")
         controller.stop()
