@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { List, AutoSizer, CellMeasurer, CellMeasurerCache } from 'react-virtualized';
-import { useDeltaList, useFlow } from 'demo-core';
+import { useDeltaList, useSectionedDeltaList, useFlow } from 'demo-core';
 
 // --- Basic List Demo ---
 
@@ -55,14 +55,9 @@ function BasicListDemo({ vm }) {
 // --- Sectioned List Demo ---
 
 function SectionedListDemo({ vm }) {
-    const rows = useDeltaList(vm.rows);
+    // Sections keep their key and items proxy as they move, so React moves the rendered rows.
+    const { sections } = useSectionedDeltaList(vm.sections);
     const [selectedSection, setSelectedSection] = useState(-1);
-
-    // Count sections for index mapping
-    const sectionIndices = [];
-    rows.forEach((row, i) => {
-        if (row && row.type === 'header') sectionIndices.push(i);
-    });
 
     return (
         <div className="demo-panel">
@@ -76,35 +71,29 @@ function SectionedListDemo({ vm }) {
                     <button onClick={() => vm.addItemToSection(selectedSection)}>+ Item</button>
                     <button onClick={() => vm.removeItemFromSection(selectedSection, 0)} disabled={selectedSection < 0}>- Item</button>
                     <button onClick={() => { vm.moveSectionUp(selectedSection); setSelectedSection(Math.max(0, selectedSection - 1)); }} disabled={selectedSection <= 0}>Move Up</button>
-                    <button onClick={() => { vm.moveSectionDown(selectedSection); setSelectedSection(Math.min(sectionIndices.length - 1, selectedSection + 1)); }} disabled={selectedSection >= sectionIndices.length - 1}>Move Down</button>
+                    <button onClick={() => { vm.moveSectionDown(selectedSection); setSelectedSection(Math.min(sections.length - 1, selectedSection + 1)); }} disabled={selectedSection >= sections.length - 1}>Move Down</button>
                 </div>
             )}
             <ul className="item-list">
-                {rows.map((row, index) => {
-                    if (!row) return null;
-                    if (row.type === 'header') {
-                        const sectionIdx = sectionIndices.indexOf(index);
-                        return (
-                            <li
-                                key={`header-${index}`}
-                                className={`section-header ${sectionIdx === selectedSection ? 'selected' : ''}`}
-                                style={{ backgroundColor: row.color, color: '#fff' }}
-                                onClick={() => setSelectedSection(sectionIdx === selectedSection ? -1 : sectionIdx)}
-                            >
-                                {row.title}
+                {sections.map((section, sectionIdx) => (
+                    <React.Fragment key={section.key}>
+                        <li
+                            className={`section-header ${sectionIdx === selectedSection ? 'selected' : ''}`}
+                            style={{ backgroundColor: section.header.color, color: '#fff' }}
+                            onClick={() => setSelectedSection(sectionIdx === selectedSection ? -1 : sectionIdx)}
+                        >
+                            {section.header.title}
+                        </li>
+                        {section.items.map((item) => (
+                            <li key={item.key} className="section-item">
+                                <span className="item-title">{item.title}</span>
+                                <span className="item-id">ID: {item.id.substring(0, 8)}...</span>
                             </li>
-                        );
-                    } else {
-                        return (
-                            <li key={row.id || `item-${index}`} className="section-item">
-                                <span className="item-title">{row.title}</span>
-                                {row.id && <span className="item-id">ID: {row.id.substring(0, 8)}...</span>}
-                            </li>
-                        );
-                    }
-                })}
+                        ))}
+                    </React.Fragment>
+                ))}
             </ul>
-            {rows.length === 0 && <div className="empty-state">No sections. Click "+ Section" to get started.</div>}
+            {sections.length === 0 && <div className="empty-state">No sections. Click "+ Section" to get started.</div>}
         </div>
     );
 }

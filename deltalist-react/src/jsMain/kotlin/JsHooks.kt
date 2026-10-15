@@ -6,6 +6,7 @@ import com.latenighthack.deltalist.SoftValue
 import com.latenighthack.deltalist.softGetOrNull
 import com.latenighthack.deltalist.softLoadedCount
 import com.latenighthack.deltalist.react.useDelegatedDeltaList
+import com.latenighthack.deltalist.react.useDelegatedSectionedDeltaList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -91,6 +92,16 @@ fun useSoftDeltaList(deltaList: Any): Any {
 @JsExport
 fun useDeltaList(deltaList: Any): Any {
     return useDelegatedDeltaList(deltaList)
+}
+
+/**
+ * Exposes a SectionedDeltaList as `{ sections: [{ key, header, items }], revision, visibleRange }`.
+ * Each `items` behaves like the array returned by [useDeltaList].
+ */
+@OptIn(ExperimentalJsExport::class)
+@JsExport
+fun useSectionedDeltaList(sectionedDeltaList: Any): Any {
+    return useDelegatedSectionedDeltaList(sectionedDeltaList)
 }
 
 @OptIn(ExperimentalJsExport::class)

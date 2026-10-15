@@ -1,7 +1,10 @@
 package com.latenighthack.deltalist.demo
 
+import com.latenighthack.deltalist.AbstractSoftList
 import com.latenighthack.deltalist.DragState
 import com.latenighthack.deltalist.LazyList
+import com.latenighthack.deltalist.Section
+import com.latenighthack.deltalist.SectionedDelta
 import com.latenighthack.deltalist.SoftList
 import com.latenighthack.deltalist.SoftValue
 import com.latenighthack.deltalist.StableItem
@@ -30,23 +33,20 @@ private fun Profile.toJs(): dynamic {
     return obj
 }
 
-private fun SectionRow.toJs(): dynamic {
+private fun SectionHeader.toJs(): dynamic {
     val obj = js("({})")
-    when (this) {
-        is SectionRow.Header -> {
-            obj.type = "header"
-            obj.title = header.title
-            obj.color = "#${header.color.toString(16).padStart(8, '0').substring(2)}"
-            obj.id = null
-        }
-        is SectionRow.ItemRow -> {
-            obj.type = "item"
-            obj.title = item.title
-            obj.color = null
-            obj.id = item.id
-        }
-    }
+    obj.title = title
+    obj.color = "#${color.toString(16).padStart(8, '0').substring(2)}"
     return obj
+}
+
+// Maps loaded rows on read; load state, size and requests pass through untouched.
+private class JsRows<T>(private val source: SoftList<T>, private val transform: (T) -> Any?) : AbstractSoftList<Any?>() {
+    override val size: Int get() = source.size
+    override fun softGet(index: Int): SoftValue<Any?>? = when (val soft = source.softGet(index)) {
+        is SoftValue.Present -> SoftValue.Present(transform(soft.value))
+        else -> soft
+    }
 }
 
 private fun DragState<Item>.toJs(): dynamic {
@@ -147,7 +147,13 @@ class JsListViewModel {
 class JsSectionedListViewModel {
     private val vm = SectionedListViewModel()
 
-    val rows: Any = vm.flattenedSections.mapItems { it.toJs() }
+    // Sections for useSectionedDeltaList: headers and items mapped to plain JS objects.
+    val sections: Any = vm.sections.map { delta ->
+        SectionedDelta(
+            delta.sections.map { Section(it.header.toJs(), JsRows(it.items) { item -> item.toJs() }) },
+            delta.change
+        )
+    }
 
     fun addSection() = vm.addSection()
     fun removeSection(index: Int) = vm.removeSection(index)

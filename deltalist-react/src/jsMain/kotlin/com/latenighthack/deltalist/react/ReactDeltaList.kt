@@ -33,6 +33,7 @@ internal class ReactDeltaListController(
     private var transform: (Any?) -> Any?,
 ) {
     private var items: SoftList<Any?>? = null
+    private var keyAt: ((Int) -> Any?)? = null
     private val acquired = mutableMapOf<Int, ItemLease<Any?>>()
     private val mapped = mutableMapOf<Int, Any?>()
     private val objectKeys: dynamic = js("new WeakMap()")
@@ -49,7 +50,8 @@ internal class ReactDeltaListController(
         mapped.clear()
     }
 
-    fun update(next: SoftList<Any?>) {
+    /** [keys] supplies a default key per position; values with a `key` keep their own. */
+    fun update(next: SoftList<Any?>, keys: ((Int) -> Any?)? = null) {
         // Acquire successors first, while previous leases still pin moved cache entries.
         val replacements = acquired.keys.mapNotNull { index ->
             next.acquireItemOrGet(index)?.let { index to it }
@@ -58,6 +60,7 @@ internal class ReactDeltaListController(
         acquired.putAll(replacements)
         mapped.clear()
         items = next
+        keyAt = keys
         revision++
     }
 
@@ -65,6 +68,7 @@ internal class ReactDeltaListController(
         releaseAcquired()
         mapped.clear()
         items = null
+        keyAt = null
     }
 
     private fun size(): Int = items?.size ?: 0
@@ -88,15 +92,20 @@ internal class ReactDeltaListController(
         val soft = SoftValue.Present(lease.item)
 
         val value = transform(soft.value)
-        installDefaultKey(value, soft.value)
+        installDefaultKey(value, soft.value, index)
         mapped[index] = value
         return value
     }
 
-    private fun installDefaultKey(mappedValue: Any?, rawValue: Any?) {
+    private fun installDefaultKey(mappedValue: Any?, rawValue: Any?, index: Int) {
         if (mappedValue == null) return
         val value = mappedValue.asDynamic()
         if (jsTypeOf(value) != "object" || value == null || value.key != js("undefined")) return
+
+        keyAt?.let { keys ->
+            value.key = keys(index)
+            return
+        }
 
         if (rawValue is Stable) {
             // StableItem wrappers may be recreated on every snapshot/read. Their
@@ -116,7 +125,12 @@ internal class ReactDeltaListController(
         }
     }
 
-    private fun visibleRange(start: Int, endInclusive: Int) {
+    private fun keyOf(index: Int): dynamic {
+        val keys = keyAt ?: return js("undefined")
+        return if (index in 0 until size()) keys(index) else js("undefined")
+    }
+
+    internal fun visibleRange(start: Int, endInclusive: Int) {
         val snapshot = items ?: return
         if (snapshot.size == 0 || endInclusive < start) {
             releaseAcquired()
@@ -180,6 +194,7 @@ internal class ReactDeltaListController(
                     "length", "size", "totalSize" -> return size()
                     "loadedCount" -> return loadedCount()
                     "revision" -> return revision
+                    "keyAt" -> return { index: Int -> keyOf(index) }
                     "visibleRange" -> return { start: Int, endInclusive: Int -> visibleRange(start, endInclusive) }
                 }
                 name.toIntOrNull()?.let { return elementAt(it) }

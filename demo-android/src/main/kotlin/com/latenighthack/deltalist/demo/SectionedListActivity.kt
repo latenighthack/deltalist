@@ -7,6 +7,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -16,7 +17,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -39,7 +39,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.latenighthack.deltalist.DeltaList
 import com.latenighthack.deltalist.softLoadedItems
-import com.latenighthack.deltalist.android.compose.collectAsDeltaState
+import com.latenighthack.deltalist.android.compose.collectAsSectionedDeltaState
+import com.latenighthack.deltalist.android.compose.sectionItems
 import com.latenighthack.deltalist.android.recyclerview.DeltaAdapter
 import com.latenighthack.deltalist.demo.ui.theme.DeltaListDemoTheme
 
@@ -87,67 +88,42 @@ private fun SectionedListScreen() {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SectionedComposeContent(viewModel: SectionedListViewModel) {
     var selectedSectionIndex by remember { mutableIntStateOf(-1) }
     var selectedItemIndex by remember { mutableIntStateOf(-1) }
-    val delta = viewModel.flattenedSections.collectAsDeltaState()
+    val state = viewModel.sections.collectAsSectionedDeltaState(itemKey = { it.id })
 
     Column(modifier = Modifier.fillMaxSize()) {
         LazyColumn(modifier = Modifier.weight(1f)) {
-            val rows = delta.items.softLoadedItems()
-            items(
-                items = rows,
-                key = { row ->
-                    when (row) {
-                        is SectionRow.Header -> "header-${row.header.title}"
-                        is SectionRow.ItemRow -> "item-${row.item.id}"
-                    }
+            state.sections.forEachIndexed { sectionIndex, section ->
+                stickyHeader(key = section.key) {
+                    SectionHeaderCard(
+                        header = section.header,
+                        isSelected = selectedSectionIndex == sectionIndex,
+                        modifier = Modifier.animateItem(),
+                        onClick = {
+                            selectedSectionIndex = if (selectedSectionIndex == sectionIndex) -1 else sectionIndex
+                            selectedItemIndex = -1
+                        }
+                    )
                 }
-            ) { row ->
-                when (row) {
-                    is SectionRow.Header -> {
-                        val sectionIndex = rows.take(rows.indexOf(row) + 1)
-                            .count { it is SectionRow.Header } - 1
-                        SectionHeaderCard(
-                            header = row.header,
-                            isSelected = selectedSectionIndex == sectionIndex,
-                            onClick = {
-                                selectedSectionIndex = if (selectedSectionIndex == sectionIndex) -1 else sectionIndex
+                sectionItems(section) { itemIndex, item ->
+                    val isSelected = selectedSectionIndex == sectionIndex && selectedItemIndex == itemIndex
+                    SectionItemCard(
+                        item = item,
+                        isSelected = isSelected,
+                        modifier = Modifier.animateItem(),
+                        onClick = {
+                            if (isSelected) {
                                 selectedItemIndex = -1
-                            }
-                        )
-                    }
-                    is SectionRow.ItemRow -> {
-                        val itemIdx = rows.indexOf(row)
-                        var sectionIdx = -1
-                        var itemInSectionIdx = -1
-                        var count = 0
-                        for ((i, r) in rows.withIndex()) {
-                            if (r is SectionRow.Header) {
-                                sectionIdx++
-                                count = 0
-                            } else if (i == itemIdx) {
-                                itemInSectionIdx = count
-                                break
                             } else {
-                                count++
+                                selectedSectionIndex = sectionIndex
+                                selectedItemIndex = itemIndex
                             }
                         }
-
-                        SectionItemCard(
-                            item = row.item,
-                            isSelected = selectedSectionIndex == sectionIdx && selectedItemIndex == itemInSectionIdx,
-                            onClick = {
-                                if (selectedSectionIndex == sectionIdx && selectedItemIndex == itemInSectionIdx) {
-                                    selectedItemIndex = -1
-                                } else {
-                                    selectedSectionIndex = sectionIdx
-                                    selectedItemIndex = itemInSectionIdx
-                                }
-                            }
-                        )
-                    }
+                    )
                 }
             }
         }
@@ -191,10 +167,11 @@ private fun SectionedComposeContent(viewModel: SectionedListViewModel) {
 private fun SectionHeaderCard(
     header: SectionHeader,
     isSelected: Boolean,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp)
             .clickable(onClick = onClick)
@@ -218,10 +195,11 @@ private fun SectionHeaderCard(
 private fun SectionItemCard(
     item: Item,
     isSelected: Boolean,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(start = 32.dp, end = 8.dp, top = 2.dp, bottom = 2.dp)
             .clickable(onClick = onClick)

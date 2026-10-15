@@ -144,7 +144,7 @@ fun <T> SoftList<T>.rememberLazyItem(key: Any, index: Int) {
 }
 
 // Structural SoftList equality must not suppress acquisition handover to a new snapshot.
-private class SnapshotIdentity(val value: Any) {
+internal class SnapshotIdentity(val value: Any) {
     override fun equals(other: Any?): Boolean = other is SnapshotIdentity && value === other.value
     override fun hashCode(): Int = 0
 }
