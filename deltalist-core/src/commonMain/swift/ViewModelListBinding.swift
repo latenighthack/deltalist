@@ -159,12 +159,14 @@ public struct DeltaListView<Raw: AnyObject, Element, RowContent: View>: View {
 
 /// The embeddable peer of `DeltaListView`: it owns collection and row observation but contributes
 /// only a `ForEach`, allowing a bound list inside stacks, grids, menus, or custom containers.
+/// Owned collection starts on first body evaluation and lasts until the view's state is destroyed.
+/// With `observing:`, the caller owns collection of the supplied list.
 @available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
 @MainActor
 public struct DeltaForEach<Raw: AnyObject, Element, RowContent: View>: View {
     private let binding: ViewModelListBinding<Raw, Element>
     private let rowContent: (Element) -> RowContent
-    @StateObject private var list = DeltaList<Raw>(materializesItems: false)
+    @StateObject private var collector = DeltaForEachCollector<Raw, Element>()
     private var suppliedList: DeltaList<Raw>? = nil
 
     public init(
@@ -186,11 +188,31 @@ public struct DeltaForEach<Raw: AnyObject, Element, RowContent: View>: View {
     }
 
     public var body: some View {
-        DeltaForEachRows(binding: binding, list: suppliedList ?? list, rowContent: rowContent)
-            .task(id: ObjectIdentifier(binding)) {
-                if suppliedList == nil { await binding.collect(into: list) }
-            }
+        collector.update(binding: suppliedList == nil ? binding : nil)
+        return DeltaForEachRows(binding: binding, list: suppliedList ?? collector.list, rowContent: rowContent)
     }
+}
+
+// A lifecycle modifier on a ForEach is installed on its produced rows. An empty ForEach
+// therefore cannot start its own collection. State ownership starts collection even when
+// there are no rows, without contributing a sibling or wrapper to List/Form/lazy containers.
+@available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
+@MainActor
+private final class DeltaForEachCollector<Raw: AnyObject, Element>: ObservableObject {
+    let list = DeltaList<Raw>(materializesItems: false)
+    private var binding: ViewModelListBinding<Raw, Element>?
+    private var task: Task<Void, Never>?
+
+    func update(binding: ViewModelListBinding<Raw, Element>?) {
+        guard self.binding !== binding else { return }
+        task?.cancel()
+        self.binding = binding
+        task = binding.map { binding in
+            Task { @MainActor [list] in await binding.collect(into: list) }
+        }
+    }
+
+    deinit { task?.cancel() }
 }
 
 @available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)

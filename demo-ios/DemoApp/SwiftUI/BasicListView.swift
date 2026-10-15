@@ -224,3 +224,27 @@ private struct BasicListCollectionViewWrapper: UIViewControllerRepresentable {
         BasicListView()
     }
 }
+
+// Empty at first appearance: collection must start without a row lifecycle callback.
+@MainActor
+struct InitiallyEmptyForEachDemo: View {
+    @State private var probe = BindingLifecycleProbe()
+    @State private var binding: DeltaListCore.ViewModelListBinding<BindingProbeRow, BindingProbeRow>?
+
+    var body: some View {
+        VStack {
+            Text("Rows arrive after one second")
+            if let binding {
+                DeltaListCore.DeltaForEach(binding) { Text($0.key) }
+            }
+        }
+        .navigationTitle("Initially Empty ForEach")
+        .task {
+            binding = DeltaListCore.ViewModelListBinding(source: probe.items, classify: { $0 }, identity: { $0.key })
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            probe.append(key: "First delayed row")
+            probe.append(key: "Second delayed row")
+        }
+    }
+}

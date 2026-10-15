@@ -53,6 +53,14 @@ private struct ConfiguredRows: View {
 }
 
 @MainActor
+private struct OwnedRows: View {
+    @ObservedObject var configuration: RowConfiguration
+    var body: some View {
+        VStack { DeltaListCore.DeltaForEach(configuration.binding) { Text($0.key) } }
+    }
+}
+
+@MainActor
 private final class MountedView {
     #if canImport(UIKit)
     let window: UIWindow
@@ -192,6 +200,88 @@ final class LifecycleTests: XCTestCase {
                 probe.clear()
             }
         }
+    }
+
+    func testOwnedForEachStartsEmptyAndReopensInEveryContainer() async {
+        for kind in 0..<4 {
+            let probe = BindingLifecycleProbe()
+            let observations = Observations()
+            let binding = binding(probe, observations)
+            for cycle in 0..<2 {
+                let rows = DeltaListCore.DeltaForEach(binding) { Text($0.key) }
+                let container: AnyView
+                switch kind {
+                case 0: container = AnyView(Form { rows })
+                case 1: container = AnyView(List { rows })
+                case 2: container = AnyView(ScrollView { LazyVStack { rows } })
+                default: container = AnyView(VStack { rows })
+                }
+                var host: MountedView? = MountedView(container)
+                await eventually("empty ForEach starts collection (container \(kind))") { probe.activeCollectors == 1 }
+                probe.append(key: "first")
+                await eventually("delayed row appears") { observations.active["first"] != nil && probe.acquiredCount == 1 }
+                probe.clear()
+                await eventually("clearing releases row") { observations.active.isEmpty && probe.acquiredCount == 0 }
+                XCTAssertEqual(probe.activeCollectors, 1, "collection survives empty rows")
+                probe.append(key: "again-\(cycle)")
+                await eventually("row after clearing appears") { observations.active.count == 1 }
+                host?.close()
+                host = nil
+                await eventually("owned collector and leases stop on teardown") {
+                    probe.activeCollectors == 0 && observations.active.isEmpty && probe.acquiredCount == 0
+                }
+                probe.clear()
+            }
+        }
+    }
+
+    #if canImport(UIKit)
+    func testOwnedForEachAddsNoListOrFormRows() async {
+        func rowCount(_ view: UIView) -> Int? {
+            if let collection = view as? UICollectionView {
+                return (0..<collection.numberOfSections).reduce(0) { $0 + collection.numberOfItems(inSection: $1) }
+            }
+            if let table = view as? UITableView {
+                return (0..<table.numberOfSections).reduce(0) { $0 + table.numberOfRows(inSection: $1) }
+            }
+            return view.subviews.compactMap { rowCount($0) }.first
+        }
+        for form in [false, true] {
+            let probe = BindingLifecycleProbe()
+            let binding = binding(probe)
+            let rows = DeltaListCore.DeltaForEach(binding) { Text($0.key) }
+            let content = Group { Text("Before"); rows; Text("After") }
+            var host: MountedView? = MountedView(form ? AnyView(Form { content }) : AnyView(List { content }))
+            await eventually("empty ForEach contributes zero native rows") { host.flatMap { rowCount($0.controller.view) } == 2 && probe.activeCollectors == 1 }
+            probe.append(key: "A")
+            await eventually("populated ForEach contributes exactly one native row") { host.flatMap { rowCount($0.controller.view) } == 3 }
+            probe.clear()
+            await eventually("clearing leaves only the surrounding rows") { host.flatMap { rowCount($0.controller.view) } == 2 }
+            host?.close()
+            host = nil
+            await eventually("row-count fixture stops") { probe.activeCollectors == 0 }
+        }
+    }
+    #endif
+
+    func testOwnedForEachInitiallyPopulatedAndBindingReplacement() async {
+        let first = BindingLifecycleProbe()
+        first.append(key: "A")
+        let second = BindingLifecycleProbe()
+        let firstObservations = Observations()
+        let secondObservations = Observations()
+        let configuration = RowConfiguration(binding: binding(first, firstObservations), store: .init())
+        var host: MountedView? = MountedView(AnyView(OwnedRows(configuration: configuration)))
+        await eventually("initial populated binding appears") { firstObservations.active["A"] != nil && first.activeCollectors == 1 }
+        configuration.binding = binding(second, secondObservations)
+        await eventually("empty replacement starts and old source stops") { first.activeCollectors == 0 && second.activeCollectors == 1 }
+        second.append(key: "B")
+        await eventually("replacement row appears") { secondObservations.active["B"] != nil && firstObservations.active.isEmpty }
+        first.append(key: "stale")
+        XCTAssertNil(secondObservations.active["stale"])
+        host?.close()
+        host = nil
+        await eventually("replacement collector stops") { second.activeCollectors == 0 && secondObservations.active.isEmpty }
     }
 
     func testMountedRowChangesBindingAndStore() async {

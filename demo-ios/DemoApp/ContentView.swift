@@ -28,6 +28,13 @@ struct ContentView: View {
                         )
                     }
 
+                    NavigationLink(destination: InitiallyEmptyForEachDemo()) {
+                        DemoButton(
+                            title: "Initially Empty ForEach",
+                            description: "Delayed rows in a VStack"
+                        )
+                    }
+
                     NavigationLink(destination: PaginatedListView()) {
                         DemoButton(
                             title: "Paginated List Demo",
