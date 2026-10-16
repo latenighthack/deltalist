@@ -1,5 +1,6 @@
 import XCTest
 import DeltaListCore
+import DemoCore
 #if canImport(UIKit)
 import UIKit
 private typealias Collection = UICollectionView
@@ -42,6 +43,10 @@ private final class CollectionFixture {
         collection.layoutIfNeeded()
         return (collection.cellForItem(at: indexPath) as? RegressionItem)?.rendered
     }
+    func shown(_ indexPath: IndexPath) -> NativeItem? {
+        collection.layoutIfNeeded()
+        return collection.cellForItem(at: indexPath)
+    }
     func close() { window.isHidden = true; window.rootViewController = nil }
     #else
     let window: NSWindow
@@ -67,6 +72,10 @@ private final class CollectionFixture {
     func rendered(_ indexPath: IndexPath) -> String? {
         collection.layoutSubtreeIfNeeded()
         return (collection.item(at: indexPath) as? RegressionItem)?.rendered
+    }
+    func shown(_ indexPath: IndexPath) -> NativeItem? {
+        collection.layoutSubtreeIfNeeded()
+        return collection.item(at: indexPath)
     }
     func close() { window.contentView = nil; window.close() }
     #endif
@@ -116,6 +125,75 @@ final class AdapterRegressionTests: XCTestCase {
             fixture.rendered(IndexPath(item: 0, section: 2)) == "a"
         }
         XCTAssertEqual((0..<3).map { fixture.collection.numberOfItems(inSection: $0) }, [3, 2, 1])
+    }
+
+    func testSectionedRowsKeepTheirObjectsAndKeysAcrossDeltas() async {
+        typealias ProbeRow = DemoCore.SectionedProbeRow
+        let probe = DemoCore.SectionedBindingProbe()
+        probe.append(category: "Work", key: "w1")
+        probe.append(category: "Work", key: "w2")
+        let fixture = CollectionFixture()
+        var shownRows: [ObjectIdentifier: ProbeRow] = [:]
+        #if canImport(UIKit)
+        let dataSource = DeltaListCore.SectionedDeltaCollectionDataSource<AnyObject, ProbeRow>(
+            collectionView: fixture.collection, cellProvider: { _, path, row in
+                let cell = fixture.item(path, text: row.key)
+                shownRows[ObjectIdentifier(cell)] = row
+                return cell
+            })
+        #else
+        let dataSource = DeltaListCore.SectionedDeltaNSCollectionDataSource<AnyObject, ProbeRow>(
+            collectionView: fixture.collection, itemProvider: { _, path, row in
+                let item = fixture.item(path, text: row.key)
+                shownRows[ObjectIdentifier(item)] = row
+                return item
+            })
+        #endif
+        defer { dataSource.unbind(); fixture.close() }
+        func row(_ path: IndexPath) -> ProbeRow? { fixture.shown(path).flatMap { shownRows[ObjectIdentifier($0)] } }
+        func sectionCount() -> Int { fixture.collection.numberOfSections }
+
+        dataSource.bind(to: probe.sections)
+        let w1 = IndexPath(item: 0, section: 0), w2 = IndexPath(item: 1, section: 0)
+        await eventually("work rows shown") { fixture.rendered(w2) == "w2" }
+        guard let work1 = row(w1), let work2 = row(w2) else { return XCTFail("rows not shown") }
+        let keys = [dataSource.itemKey(at: w1), dataSource.itemKey(at: w2)]
+        let workKey = dataSource.sectionKey(at: 0)
+        XCTAssertEqual(probe.built, 2, "only shown rows are built")
+        XCTAssertTrue(dataSource.item(at: w1) === work1)
+
+        // A Personal section appears in front of Work.
+        probe.insert(index: 0, category: "Personal", key: "p")
+        let moved1 = IndexPath(item: 0, section: 1), moved2 = IndexPath(item: 1, section: 1)
+        await eventually("personal section shown") { sectionCount() == 2 && fixture.rendered(moved2) == "w2" }
+        XCTAssertTrue(row(moved1) === work1, "the cell shows the cached row")
+        XCTAssertTrue(row(moved2) === work2)
+        XCTAssertTrue(dataSource.item(at: moved1) === work1)
+        XCTAssertEqual([dataSource.itemKey(at: moved1), dataSource.itemKey(at: moved2)], keys)
+        XCTAssertEqual(dataSource.sectionKey(at: 1), workKey)
+        XCTAssertNotEqual(dataSource.sectionKey(at: 0), workKey)
+        XCTAssertFalse(keys.contains(dataSource.itemKey(at: IndexPath(item: 0, section: 0))), "keys are not positional")
+        XCTAssertEqual(probe.built, 3, "only the new row is built")
+
+        // It disappears again.
+        probe.removeAt(index: 0)
+        await eventually("personal section removed") { sectionCount() == 1 && fixture.rendered(w2) == "w2" }
+        XCTAssertTrue(row(w1) === work1)
+        XCTAssertTrue(row(w2) === work2)
+        XCTAssertEqual([dataSource.itemKey(at: w1), dataSource.itemKey(at: w2)], keys)
+        XCTAssertEqual(dataSource.sectionKey(at: 0), workKey)
+
+        // An update rebuilds only that row.
+        probe.replace(index: 1, category: "Work", key: "w2'")
+        await eventually("updated row shown") { fixture.rendered(w2) == "w2'" }
+        XCTAssertTrue(row(w1) === work1)
+        XCTAssertFalse(row(w2) === work2)
+        XCTAssertEqual([dataSource.itemKey(at: w1), dataSource.itemKey(at: w2)], keys)
+        XCTAssertEqual(probe.built, 4)
+
+        XCTAssertEqual(probe.acquiredCount, 2, "each shown cell pins its row")
+        dataSource.unbind()
+        XCTAssertEqual(probe.acquiredCount, 0, "unbinding releases every row")
     }
 
     func testStableIdentifiersRefreshReplacementAndInPlaceUpdates() async {

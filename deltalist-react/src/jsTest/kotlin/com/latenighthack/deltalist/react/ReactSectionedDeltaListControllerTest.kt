@@ -3,6 +3,7 @@ package com.latenighthack.deltalist.react
 
 import com.latenighthack.deltalist.*
 import com.latenighthack.deltalist.operators.lazyMap
+import com.latenighthack.deltalist.operators.lazyMapItems
 import com.latenighthack.deltalist.operators.sectionedDeltaList
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
@@ -39,6 +40,39 @@ class ReactSectionedDeltaListControllerTest {
         list.removeItem(1, 0); runCurrent()
         assertEquals(bKey, handle.sections[1].items[0].key)
         assertEquals(3, handle.revision)
+        controller.dispose()
+    }
+
+    private class Row(val value: String)
+
+    @Test fun lazilyMappedRowsKeepTheirObjectsWhenTheyShift() = runTest {
+        var built = 0
+        val list = mutableSectionedDeltaListOf<Any?, String>(listOf(Section("A", listOf("a1", "a2")), Section("B", listOf("b1"))))
+        val rows = list.lazyMapItems<Any?, String, Any?> { Row(it).also { built++ } }
+        val controller = ReactSectionedDeltaListController({ it }, { js("({ row: it })") })
+        val ids = SectionedStableIds()
+        backgroundScope.launch { rows.collect { controller.update(it, ids.apply(it)) } }
+        runCurrent()
+
+        val handle = controller.handle
+        val first: dynamic = handle.sections[0].items
+        val a1 = first[0].row
+        val a2 = first[1].row
+        val keys = listOf(first[0].key, first[1].key)
+        assertEquals(2, built)
+
+        list.insertItem(0, 0, "a0"); runCurrent()
+        val shifted: dynamic = handle.sections[0].items
+        assertSame(a1, shifted[1].row, "a1 after an insert above it")
+        assertSame(a2, shifted[2].row, "a2 after an insert above it")
+        assertEquals(keys, listOf(shifted[1].key, shifted[2].key))
+        assertEquals(2, built, "the inserted row is built only when read")
+
+        list.insertSection(0, "N", listOf("n")); runCurrent()
+        val moved: dynamic = handle.sections[1].items
+        assertSame(a1, moved[1].row, "a1 after a section insert")
+        assertSame(a2, moved[2].row, "a2 after a section insert")
+        assertEquals(keys, listOf(moved[1].key, moved[2].key))
         controller.dispose()
     }
 

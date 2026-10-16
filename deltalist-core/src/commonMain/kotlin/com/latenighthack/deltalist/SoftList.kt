@@ -133,6 +133,21 @@ fun <T> SoftList<T>.softLoadedCount(): Int {
     return count
 }
 
+/** A list whose [softGet] does more than read a slot (such as mapping it) and can report load state without that work. */
+internal interface LoadStateSoftList<out T> : SoftList<T> {
+    fun isLoadedAt(index: Int): Boolean
+}
+
+/** Whether [index] is loaded, without mapping a lazily mapped value. */
+internal fun SoftList<*>.isLoadedWithoutMapping(index: Int): Boolean =
+    if (this is LoadStateSoftList<*>) isLoadedAt(index) else softGet(index) is SoftValue.Present
+
+/** The length of the contiguous loaded prefix, without mapping lazily mapped values. */
+internal fun SoftList<*>.loadedPrefixSize(): Int {
+    for (index in 0 until size) if (!isLoadedWithoutMapping(index)) return index
+    return size
+}
+
 /** Maps the contiguous loaded prefix, stopping at the first gap without requesting it. */
 fun <T, R> SoftList<T>.softMapLoaded(transform: (T) -> R): List<R> {
     val result = mutableListOf<R>()
@@ -285,6 +300,24 @@ fun <S, T> SectionedDelta<S, T>.getItemCountAt(sectionIndex: Int): Int =
  */
 fun <S, T> SectionedDelta<S, T>.getItemAt(sectionIndex: Int, itemIndex: Int): T? =
     (sections.getOrNull(sectionIndex)?.items?.softGet(itemIndex) as? SoftValue.Present)?.value
+
+/**
+ * Acquires the item at the given section and item indices, or returns null if it is out of bounds,
+ * unloaded or superseded. A lazily mapped section returns its cached row and pins it until the
+ * lease is released. Native bindings should use this rather than [getItemAt], which never reads
+ * the cache.
+ * This is safe to call from iOS - pass the SectionedDelta directly to avoid bridging issues.
+ */
+fun <S, T> SectionedDelta<S, T>.acquireItemAt(sectionIndex: Int, itemIndex: Int): ItemLease<T>? =
+    sections.getOrNull(sectionIndex)?.items?.acquireItemOrGet(itemIndex)
+
+/**
+ * Returns the length of the contiguous loaded prefix of the section at the given index, or 0 if
+ * out of bounds. Lazily mapped sections answer from their source, so no row is built.
+ * This is safe to call from iOS - pass the SectionedDelta directly to avoid bridging issues.
+ */
+fun <S, T> SectionedDelta<S, T>.getLoadedItemCountAt(sectionIndex: Int): Int =
+    sections.getOrNull(sectionIndex)?.items?.loadedPrefixSize() ?: 0
 
 /**
  * Returns the loaded items in the section at the given index.

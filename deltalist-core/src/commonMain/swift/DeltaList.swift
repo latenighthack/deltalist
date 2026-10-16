@@ -443,11 +443,11 @@ func triggerLoadAtViaRuntime(_ obj: AnyObject, index: Int32) {
 
 // MARK: - Sectioned runtime-selector helpers
 //
-// Used only when both the same-module and SKIE-erased generic casts fail (a consumer framework's
-// own SectionedDelta class). Call the exported Kotlin accessor methods directly by selector so the
-// backing list is never bridged. Mirrors the private helpers in the UIKit sectioned data source.
+// Used when both the same-module and SKIE-erased generic casts fail (a consumer framework's own
+// SectionedDelta class), and by the sectioned data sources for every delta. Call the exported
+// Kotlin accessor methods directly by selector so the backing list is never bridged.
 
-private func sectionCountViaRuntime(_ obj: AnyObject) -> Int {
+func sectionCountViaRuntime(_ obj: AnyObject) -> Int {
     typealias Fn = @convention(c) (AnyObject, Selector) -> Int32
     let sel = DeltaSelector.sectionCount
     guard let imp = DeltaIMPCache.shared.imp(for: obj, sel) else { return 0 }
@@ -461,21 +461,21 @@ private func sectionedChangeViaRuntime(_ obj: AnyObject) -> AnyObject? {
     return unsafeBitCast(imp, to: Fn.self)(obj, sel)
 }
 
-private func headerViaRuntime(_ obj: AnyObject, sectionIndex: Int32) -> Any? {
+func headerViaRuntime(_ obj: AnyObject, sectionIndex: Int32) -> Any? {
     typealias Fn = @convention(c) (AnyObject, Selector, Int32) -> AnyObject?
     let sel = DeltaSelector.getHeaderAt
     guard let imp = DeltaIMPCache.shared.imp(for: obj, sel) else { return nil }
     return unsafeBitCast(imp, to: Fn.self)(obj, sel, sectionIndex)
 }
 
-private func itemCountViaRuntime(_ obj: AnyObject, sectionIndex: Int32) -> Int {
+func itemCountViaRuntime(_ obj: AnyObject, sectionIndex: Int32) -> Int {
     typealias Fn = @convention(c) (AnyObject, Selector, Int32) -> Int32
     let sel = DeltaSelector.getItemCountAt
     guard let imp = DeltaIMPCache.shared.imp(for: obj, sel) else { return 0 }
     return Int(unsafeBitCast(imp, to: Fn.self)(obj, sel, sectionIndex))
 }
 
-private func itemViaRuntime(_ obj: AnyObject, sectionIndex: Int32, itemIndex: Int32) -> Any? {
+func itemViaRuntime(_ obj: AnyObject, sectionIndex: Int32, itemIndex: Int32) -> Any? {
     typealias Fn = @convention(c) (AnyObject, Selector, Int32, Int32) -> AnyObject?
     let sel = DeltaSelector.getItemAt
     guard let imp = DeltaIMPCache.shared.imp(for: obj, sel) else { return nil }

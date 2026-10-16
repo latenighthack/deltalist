@@ -215,6 +215,13 @@ the acquired cache entry through moves. A release after removal or reload cannot
 evict a replacement at the same index. Acquire the successor before releasing a
 previous lease when handing a mounted row to a newer snapshot.
 
+`lazyMapItems` is the sectioned counterpart of `lazyMap`, with one cache per section
+and the same leases. Each section's cache follows `Items` changes within that section and
+follows its section through `Sections` insert, remove and move. `Update` re-runs the mapper
+for that item's cached row only, a header `Update` keeps the section's rows, and `Reload`
+clears every cache. A change that does not fit the previous emission is delivered as
+`Reload`. It is not called `lazyMap` because both receivers are a `Flow` on the JVM.
+
 `concat`, `concatSections`, `header`, `footer`, `flattenItems`, mapped `flatten`,
 and `withStableIds` preserve acquisition/release. Thus `lazyMap → ifEmpty →
 composition` is supported. Pure `softGet` may evaluate a mapper, but never pins a
@@ -228,7 +235,14 @@ Platform bindings own their leases. Compose callers should use `rememberItem`
 or `rememberLazyItemState`; plain reads do not install disposal hooks. Swift's
 `DeltaList.acquireItem(at:)` exposes an owned handle for custom native renderers.
 Generated SwiftUI rows and native collection-view bindings handle pinning during
-row/cell lifetime. The lazy SwiftUI view retains slot metadata and mounted wrappers,
+row/cell lifetime. The UIKit and AppKit sectioned data sources lease each visible cell's
+row through the snapshot instead of peeking rows on every delta, and key sections and
+rows with Kotlin's `SectionedStableIds` (`sectionKey(at:)`, `itemKey(at:)`). Each section
+shows its contiguous loaded prefix. When the collection view reloads (including every
+delta from another Kotlin framework, whose change Swift cannot read), displaced leases are
+released only after the visible cells have their rows, so a row that changes cells keeps
+its object. React's sectioned hook re-pins held rows by their tracked keys, so a row that
+shifts within its section keeps its object too. The lazy SwiftUI view retains slot metadata and mounted wrappers,
 not an array of every generated child. Nominal keys remain the row identity;
 observation follows the acquired raw object's identity.
 
@@ -268,8 +282,33 @@ contiguous values; grouping never requests the missing page. The `flatten` foote
 mapper likewise receives the section's loaded prefix.
 
 Use fully loaded collections for authoritative groups/counts. Group domain data
-before constructing expensive row objects, then lazily map each section's row flow
-before composing it with headers or other sections.
+before constructing expensive row objects, then lazily map each section's rows with
+`lazyMapItems`, so rows are built only when a binding shows them:
+
+```kotlin
+val connections: SectionedDeltaList<Header, ConnectionRow> = entries
+    .filterItemsDynamic(matches)
+    .groupBy(keySelector = { it.category }, headerMapper = { category, _ -> headerOf(category) })
+    .lazyMapItems { entry -> ConnectionRow(entry) }
+```
+
+`groupBy` follows upstream mutations into the groups and emits one `SectionedChange`
+per emission:
+
+| Upstream edit | Emitted change |
+|---|---|
+| Groups appear or disappear, and every other group keeps its items and order | `Sections` with `Remove` and `Insert` |
+| Edits confined to one group, with the group keys unchanged | `Items(section, …)` in that section's coordinates |
+| A mapped header changes while its group's items do not | `Sections` with `Update` |
+| Nothing in the projection changes (for example, only unloaded positions) | an empty `Sections` |
+| Anything else | `Reload` |
+
+`Reload` covers upstream reloads, groups changing order, edits in several groups, and a
+group appearing or disappearing while another group's items change. Moving the only item
+of one group into another group is such a case, because it removes a section and changes
+another in one emission. Items are matched by position through the upstream mutations,
+never by equality, so `SectionedStableIds` and `lazyMapItems` caches survive every change
+except `Reload`.
 
 ### Native lifecycle tests
 

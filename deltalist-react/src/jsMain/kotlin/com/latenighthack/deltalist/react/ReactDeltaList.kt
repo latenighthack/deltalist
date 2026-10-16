@@ -50,11 +50,17 @@ internal class ReactDeltaListController(
         mapped.clear()
     }
 
-    /** [keys] supplies a default key per position; values with a `key` keep their own. */
+    /**
+     * [keys] supplies a default key per position; values with a `key` keep their own. When both
+     * this and the previous snapshot have [keys], each held lease follows its key to its new
+     * position, so a row that shifts keeps its cached object; otherwise leases stay by position.
+     */
     fun update(next: SoftList<Any?>, keys: ((Int) -> Any?)? = null) {
         // Acquire successors first, while previous leases still pin moved cache entries.
+        val successor = successors(next, keys)
         val replacements = acquired.keys.mapNotNull { index ->
-            next.acquireItemOrGet(index)?.let { index to it }
+            val target = successor(index) ?: return@mapNotNull null
+            next.acquireItemOrGet(target)?.let { target to it }
         }.toMap()
         releaseAcquired()
         acquired.putAll(replacements)
@@ -62,6 +68,14 @@ internal class ReactDeltaListController(
         items = next
         keyAt = keys
         revision++
+    }
+
+    /** Where the row at each previous position is in [next], or null once it is gone. */
+    private fun successors(next: SoftList<Any?>, keys: ((Int) -> Any?)?): (Int) -> Int? {
+        val previous = keyAt
+        if (keys == null || previous == null || acquired.isEmpty()) return { it }
+        val positions = (0 until next.size).associateBy(keys)
+        return { index -> positions[previous(index)] }
     }
 
     fun dispose() {

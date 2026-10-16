@@ -459,6 +459,13 @@ public class DeltaCollectionDataSource<T: AnyObject>: NSObject,
 
 /// Traditional UICollectionViewDataSource that observes a SectionedDeltaList.
 /// NO DiffableDataSource - direct data source/delegate implementation with performBatchUpdates.
+///
+/// Rows are read through the snapshot, as `DeltaCollectionDataSource` reads them: each visible
+/// cell leases its row until it ends displaying or shows another row, so a lazily mapped section
+/// (`lazyMapItems`) hands every cell its cached row and builds rows only for cells it shows.
+/// Rows are never peeked on a delta. Sections and rows are keyed by Kotlin's
+/// `SectionedStableIds` (`sectionKey(at:)`, `itemKey(at:)`), which follow them through changes.
+/// Each section shows its contiguous loaded prefix.
 @available(iOS 14.0, *)
 @MainActor
 public class SectionedDeltaCollectionDataSource<H: AnyObject, T: AnyObject>: NSObject,
@@ -472,13 +479,29 @@ public class SectionedDeltaCollectionDataSource<H: AnyObject, T: AnyObject>: NSO
 
     // MARK: - Section Data
 
+    /// One section of the current emission.
     public struct SectionData {
         public let header: H
-        public var items: [T]
+        /// The section's loaded rows, read through the current snapshot (see `DeltaSectionItems`).
+        public let items: DeltaSectionItems<T>
+        /// Session-stable key of the section, following it through section changes.
+        public let key: Int
+        /// Session-stable key of each row, following it through changes.
+        public let itemKeys: [Int]
 
+        /// A hand-built section; its keys are positional.
         public init(header: H, items: [T]) {
             self.header = header
-            self.items = items
+            self.items = DeltaSectionItems(items)
+            self.key = 0
+            self.itemKeys = Array(items.indices)
+        }
+
+        init(header: H, snapshot: SectionedDeltaSnapshot, section: Int) {
+            self.header = header
+            self.items = DeltaSectionItems(snapshot: snapshot, section: section)
+            self.key = snapshot.sectionKeys[section]
+            self.itemKeys = snapshot.itemKeys[section]
         }
     }
 
@@ -488,6 +511,8 @@ public class SectionedDeltaCollectionDataSource<H: AnyObject, T: AnyObject>: NSO
     private(set) public var sections: [SectionData] = []
     private var task: Task<Void, Never>?
     private var hasReceivedInitialData = false
+    private var snapshot = SectionedDeltaSnapshot.empty
+    private let leases = DeltaCellLeases<T>()
 
     // Stepped counts so per-operation batch updates stay consistent during application
     // (mirrors DeltaCollectionDataSource). At rest, appliedSectionCount == sections.count
@@ -534,20 +559,13 @@ public class SectionedDeltaCollectionDataSource<H: AnyObject, T: AnyObject>: NSO
     public func bind(to flow: some AsyncSequence) {
         unbind()
         hasReceivedInitialData = false
+        snapshot = .empty
         task = Task { @MainActor [weak self] in
             do {
                 for try await value in flow {
                     if Task.isCancelled { break }
                     guard let self = self else { break }
-
-                    if let sectionedDelta = value as? SectionedDelta<H, T> {
-                        self.applySectionedDelta(sectionedDelta)
-                    } else if let sectionedDelta = value as? SectionedDelta<AnyObject, AnyObject> {
-                        self.applySectionedDeltaErased(sectionedDelta)
-                    } else {
-                        // Cross-module compatibility
-                        self.applySectionedDeltaAny(value as AnyObject)
-                    }
+                    self.applySectionedDelta(value as AnyObject)
                 }
             } catch {
                 if !Task.isCancelled && !(error is CancellationError) { self?.onError?(error) }
@@ -558,205 +576,52 @@ public class SectionedDeltaCollectionDataSource<H: AnyObject, T: AnyObject>: NSO
     public func unbind() {
         task?.cancel()
         task = nil
+        leases.releaseAll()
     }
 
     // MARK: - Delta Application
-    // CRITICAL: Never access delta.sections directly! Use Kotlin helper methods to avoid bridging.
+    // CRITICAL: Never access delta.sections directly, and never peek rows: read through the
+    // snapshot so the Kotlin backing list is not bridged and cached rows are reused.
 
-    private func applySectionedDelta(_ delta: SectionedDelta<H, T>) {
-        // Use Kotlin helper methods to avoid bridging catastrophe
-        let sectionCount = Int(delta.sectionCount())
-        var newSections: [SectionData] = []
-        for sectionIdx in 0..<sectionCount {
-            guard let header = delta.getHeaderAt(sectionIndex: Int32(sectionIdx)) as? H else { continue }
-            // Get items one by one to avoid list bridging
-            let itemCount = Int(delta.getItemCountAt(sectionIndex: Int32(sectionIdx)))
-            var items: [T] = []
-            for itemIdx in 0..<itemCount {
-                if let item = delta.getItemAt(sectionIndex: Int32(sectionIdx), itemIndex: Int32(itemIdx)) as? T {
-                    items.append(item)
-                }
-            }
-            newSections.append(SectionData(header: header, items: items))
+    private func applySectionedDelta(_ delta: AnyObject) {
+        let next = SectionedDeltaSnapshot(delta, previousIds: snapshot.ids)
+        let newSections = next.headers.indices.compactMap { index in
+            (next.headers[index] as? H).map { SectionData(header: $0, snapshot: next, section: index) }
         }
+        // A distinct framework's change can't be cast; its keys still follow it in Kotlin.
+        let change = (delta as? SectionedDelta<AnyObject, AnyObject>)?.change
+            ?? (changeViaRuntime(delta) as? SectionedChange)
+        snapshot = next
 
-        applyChanges(newSections: newSections, change: delta.change)
-    }
+        let oldSections = sections
+        let oldItemCounts = sections.map { $0.items.count }
+        sections = newSections
+        onSectionsChanged?(newSections)
 
-    private func applySectionedDeltaErased(_ delta: SectionedDelta<AnyObject, AnyObject>) {
-        // Use Kotlin helper methods to avoid bridging catastrophe
-        let sectionCount = Int(delta.sectionCount())
-        var newSections: [SectionData] = []
-        for sectionIdx in 0..<sectionCount {
-            guard let header = delta.getHeaderAt(sectionIndex: Int32(sectionIdx)) as? H else { continue }
-            // Get items one by one to avoid list bridging
-            let itemCount = Int(delta.getItemCountAt(sectionIndex: Int32(sectionIdx)))
-            var items: [T] = []
-            for itemIdx in 0..<itemCount {
-                if let item = delta.getItemAt(sectionIndex: Int32(sectionIdx), itemIndex: Int32(itemIdx)) as? T {
-                    items.append(item)
-                }
-            }
-            newSections.append(SectionData(header: header, items: items))
-        }
-
-        applyChanges(newSections: newSections, change: delta.change)
-    }
-
-    private func applySectionedDeltaAny(_ delta: AnyObject) {
-        // Cross-module fallback: use Obj-C runtime to call methods directly
-        // This handles cases like DemoCoreSectionedDelta where generic casts fail
-
-        // Use Obj-C runtime directly - don't use KVC as it doesn't work with Kotlin classes
-        let sectionCount = callSectionCountViaRuntime(delta)
-
-        if sectionCount == 0 {
-            // Check if we got 0 because there are no sections, or because the call failed.
-            // Try one more cast approach.
-            if let anyDelta = delta as? SectionedDelta<AnyObject, AnyObject> {
-                let count = Int(anyDelta.sectionCount())
-                if count > 0 {
-                    extractAndApplySections(from: anyDelta, sectionCount: count)
-                    return
-                }
-            }
-            sections = []
-            appliedSectionCount = 0
-            onSectionsChanged?([])
-            collectionView?.reloadData()
-            return
-        }
-
-        // Extract sections using Obj-C runtime calls
-        var newSections: [SectionData] = []
-        for sectionIdx in 0..<sectionCount {
-            guard let header = callGetHeaderAt(delta, sectionIndex: Int32(sectionIdx)) as? H else {
-                continue
-            }
-
-            let itemCount = callGetItemCountAt(delta, sectionIndex: Int32(sectionIdx))
-
-            var items: [T] = []
-            for itemIdx in 0..<itemCount {
-                if let item = callGetItemAt(delta, sectionIndex: Int32(sectionIdx), itemIndex: Int32(itemIdx)) as? T {
-                    items.append(item)
-                }
-            }
-            newSections.append(SectionData(header: header, items: items))
-        }
-
-        // Get change via Obj-C runtime
-        let change = callGetChange(delta)
-
-        // On first data, always reload
-        if !hasReceivedInitialData {
+        guard collectionView != nil else { return }
+        guard hasReceivedInitialData, let change, newSections.count == next.headers.count else {
             hasReceivedInitialData = true
-            sections = newSections
-            appliedSectionCount = newSections.count
-            onSectionsChanged?(newSections)
-            collectionView?.reloadData()
+            reloadAll()
             return
         }
-
-        let oldSections = sections
-        let oldSectionCount = sections.count
-        let oldItemCounts = sections.map { $0.items.count }
-        sections = newSections
-        onSectionsChanged?(newSections)
-
-        if let change = change {
-            applySectionedChange(change, oldSections: oldSections, oldSectionCount: oldSectionCount, oldItemCounts: oldItemCounts)
-        } else {
-            appliedSectionCount = newSections.count
-            collectionView?.reloadData()
-        }
+        applySectionedChange(change, oldSections: oldSections, oldItemCounts: oldItemCounts)
     }
 
-    private func extractAndApplySections(from delta: SectionedDelta<AnyObject, AnyObject>, sectionCount: Int) {
-        var newSections: [SectionData] = []
-        for sectionIdx in 0..<sectionCount {
-            guard let header = delta.getHeaderAt(sectionIndex: Int32(sectionIdx)) as? H else { continue }
-            let itemCount = Int(delta.getItemCountAt(sectionIndex: Int32(sectionIdx)))
-            var items: [T] = []
-            for itemIdx in 0..<itemCount {
-                if let item = delta.getItemAt(sectionIndex: Int32(sectionIdx), itemIndex: Int32(itemIdx)) as? T {
-                    items.append(item)
-                }
-            }
-            newSections.append(SectionData(header: header, items: items))
-        }
-
-        applyChanges(newSections: newSections, change: delta.change)
-    }
-
-    /// Call sectionCount via ObjC runtime for Int32 return type
-    private func callSectionCountViaRuntime(_ obj: AnyObject) -> Int {
-        typealias MethodType = @convention(c) (AnyObject, Selector) -> Int32
-        let sel = DeltaSelector.sectionCount
-        guard let imp = DeltaIMPCache.shared.imp(for: obj, sel) else { return 0 }
-        return Int(unsafeBitCast(imp, to: MethodType.self)(obj, sel))
-    }
-
-    /// Call change property via ObjC runtime
-    private func callGetChange(_ obj: AnyObject) -> SectionedChange? {
-        typealias MethodType = @convention(c) (AnyObject, Selector) -> AnyObject?
-        let sel = DeltaSelector.change
-        guard let imp = DeltaIMPCache.shared.imp(for: obj, sel) else { return nil }
-        return unsafeBitCast(imp, to: MethodType.self)(obj, sel) as? SectionedChange
-    }
-
-    /// Call getHeaderAt via ObjC runtime
-    private func callGetHeaderAt(_ obj: AnyObject, sectionIndex: Int32) -> Any? {
-        typealias MethodType = @convention(c) (AnyObject, Selector, Int32) -> AnyObject?
-        let sel = DeltaSelector.getHeaderAt
-        guard let imp = DeltaIMPCache.shared.imp(for: obj, sel) else { return nil }
-        return unsafeBitCast(imp, to: MethodType.self)(obj, sel, sectionIndex)
-    }
-
-    /// Call getItemCountAt via ObjC runtime
-    private func callGetItemCountAt(_ obj: AnyObject, sectionIndex: Int32) -> Int {
-        typealias MethodType = @convention(c) (AnyObject, Selector, Int32) -> Int32
-        let sel = DeltaSelector.getItemCountAt
-        guard let imp = DeltaIMPCache.shared.imp(for: obj, sel) else { return 0 }
-        return Int(unsafeBitCast(imp, to: MethodType.self)(obj, sel, sectionIndex))
-    }
-
-    /// Call getItemAt via ObjC runtime
-    private func callGetItemAt(_ obj: AnyObject, sectionIndex: Int32, itemIndex: Int32) -> Any? {
-        typealias MethodType = @convention(c) (AnyObject, Selector, Int32, Int32) -> AnyObject?
-        let sel = DeltaSelector.getItemAt
-        guard let imp = DeltaIMPCache.shared.imp(for: obj, sel) else { return nil }
-        return unsafeBitCast(imp, to: MethodType.self)(obj, sel, sectionIndex, itemIndex)
-    }
-
-    private func applyChanges(newSections: [SectionData], change: SectionedChange) {
-        // Capture pre-change counts before overwriting `sections` so the per-operation
-        // stepping below can report consistent intermediate counts.
-        let oldSections = sections
-        let oldSectionCount = sections.count
-        let oldItemCounts = sections.map { $0.items.count }
-
-        sections = newSections
-        onSectionsChanged?(newSections)
-
+    /// Reloads every section. Rows that stay visible keep their cached objects.
+    private func reloadAll() {
         guard let collectionView = collectionView else { return }
-
-        if !hasReceivedInitialData {
-            hasReceivedInitialData = true
+        leases.deferringReleases {
             appliedSectionCount = sections.count
             collectionView.reloadData()
-            return
+            collectionView.layoutIfNeeded()
         }
-
-        applySectionedChange(change, oldSections: oldSections, oldSectionCount: oldSectionCount, oldItemCounts: oldItemCounts)
     }
 
-    private func applySectionedChange(_ change: SectionedChange, oldSections: [SectionData], oldSectionCount: Int, oldItemCounts: [Int]) {
+    private func applySectionedChange(_ change: SectionedChange, oldSections: [SectionData], oldItemCounts: [Int]) {
         guard let collectionView = collectionView else { return }
 
         if change is SectionedChange.Reload {
-            appliedSectionCount = sections.count
-            collectionView.reloadData()
+            reloadAll()
             return
         }
 
@@ -765,11 +630,10 @@ public class SectionedDeltaCollectionDataSource<H: AnyObject, T: AnyObject>: NSO
             // appliedSectionCount (which numberOfSections returns during application).
             guard let states = deltaSectionStates(sectionChanges.mutations, old: oldSections,
                                                   new: sections, itemCount: { $0.items.count }) else {
-                appliedSectionCount = sections.count
-                collectionView.reloadData()
+                reloadAll()
                 return
             }
-            appliedSectionCount = oldSectionCount
+            appliedSectionCount = oldSections.count
             applyingSections = oldSections
             defer { applyingSections = nil }
             for (index, mutation) in sectionChanges.mutations.enumerated() {
@@ -796,15 +660,18 @@ public class SectionedDeltaCollectionDataSource<H: AnyObject, T: AnyObject>: NSO
 
         if let itemChanges = change as? SectionedChange.Items {
             let sectionIndex = Int(itemChanges.section)
-            guard sectionIndex >= 0, sectionIndex < sections.count, sectionIndex < oldItemCounts.count else {
-                appliedSectionCount = sections.count
-                collectionView.reloadData()
+            guard sectionIndex >= 0, sectionIndex < sections.count, sectionIndex < oldItemCounts.count,
+                  sections.count == oldSections.count else {
+                reloadAll()
                 return
             }
             let startCount = oldItemCounts[sectionIndex]
             let endCount = sections[sectionIndex].items.count
             guard mutationsAreConsistent(itemChanges.mutations, startCount: startCount, endCount: endCount) else {
-                collectionView.reloadSections(IndexSet(integer: sectionIndex))
+                leases.deferringReleases {
+                    collectionView.reloadSections(IndexSet(integer: sectionIndex))
+                    collectionView.layoutIfNeeded()
+                }
                 return
             }
 
@@ -836,8 +703,7 @@ public class SectionedDeltaCollectionDataSource<H: AnyObject, T: AnyObject>: NSO
             return
         }
 
-        appliedSectionCount = sections.count
-        collectionView.reloadData()
+        reloadAll()
     }
 
     /// Simulates the running item count through `operations`, bounds-checking each step.
@@ -889,8 +755,15 @@ public class SectionedDeltaCollectionDataSource<H: AnyObject, T: AnyObject>: NSO
             // animated update must be recoverable. Return an empty placeholder.
             return UICollectionViewCell()
         }
-        let item = sections[indexPath.section].items[indexPath.item]
-        return cellProvider(collectionView, indexPath, item)
+        let items = sections[indexPath.section].items
+        guard let lease = items.acquire(indexPath.item) else {
+            // A hand-built or superseded section: show its row without pinning it.
+            guard let row = items.element(indexPath.item) else { return UICollectionViewCell() }
+            return cellProvider(collectionView, indexPath, row)
+        }
+        let cell = cellProvider(collectionView, indexPath, lease.item)
+        leases.hold(lease, for: cell)
+        return cell
     }
 
     public func collectionView(_ collectionView: UICollectionView, viewForSupplementaryElementOfKind kind: String, at indexPath: IndexPath) -> UICollectionReusableView {
@@ -906,25 +779,40 @@ public class SectionedDeltaCollectionDataSource<H: AnyObject, T: AnyObject>: NSO
 
     // MARK: - UICollectionViewDelegate
 
+    public func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        leases.release(for: cell)
+    }
+
     public func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        guard indexPath.section < sections.count,
-              indexPath.item < sections[indexPath.section].items.count else { return }
-        let item = sections[indexPath.section].items[indexPath.item]
+        guard let item = item(at: indexPath) else { return }
         onItemSelected?(indexPath, item)
         collectionView.deselectItem(at: indexPath, animated: true)
     }
 
     // MARK: - Item Access
 
+    /// The row at [indexPath], read through the snapshot: a visible row is its cell's object.
     public func item(at indexPath: IndexPath) -> T? {
-        guard indexPath.section < sections.count,
-              indexPath.item < sections[indexPath.section].items.count else { return nil }
-        return sections[indexPath.section].items[indexPath.item]
+        guard indexPath.section < sections.count else { return nil }
+        return sections[indexPath.section].items.element(indexPath.item)
     }
 
     public func header(at section: Int) -> H? {
         guard section < sections.count else { return nil }
         return sections[section].header
+    }
+
+    /// Session-stable key of the section at [section] (`SectionedStableIds`).
+    public func sectionKey(at section: Int) -> Int? {
+        guard section < sections.count else { return nil }
+        return sections[section].key
+    }
+
+    /// Session-stable key of the row at [indexPath] (`SectionedStableIds`).
+    public func itemKey(at indexPath: IndexPath) -> Int? {
+        guard indexPath.section < sections.count,
+              indexPath.item < sections[indexPath.section].itemKeys.count else { return nil }
+        return sections[indexPath.section].itemKeys[indexPath.item]
     }
 
     deinit {

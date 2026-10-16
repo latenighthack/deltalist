@@ -10,6 +10,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
 import com.latenighthack.deltalist.*
 import com.latenighthack.deltalist.operators.lazyMap
+import com.latenighthack.deltalist.operators.lazyMapItems
 import com.latenighthack.deltalist.operators.sectionedDeltaList
 import kotlinx.coroutines.flow.flowOf
 import org.junit.Assert.*
@@ -58,6 +59,47 @@ class SectionedStateTest {
         compose.runOnIdle {
             assertEquals(bKey, state!!.sections[1].itemKey(0))
             assertTrue(state!!.change is SectionedChange.Items)
+        }
+    }
+
+    private class Row(val value: String)
+
+    @Test fun lazilyMappedSectionsKeepTheirRowsAndKeysAcrossSectionChanges() {
+        val list = mutableSectionedDeltaListOf(listOf(Section("Work", listOf("w1", "w2"))))
+        val rows = list.lazyMapItems { Row(it) }
+        val shown = mutableMapOf<Any, Row>()
+        var state: SectionedDeltaState<String, Row>? = null
+        compose.setContent {
+            val current = rows.collectAsSectionedDeltaState()
+            state = current
+            LazyColumn(Modifier.height(400.dp)) {
+                for (section in current.sections) {
+                    item(key = section.key) { BasicText(section.header) }
+                    sectionItems(section) { index, row ->
+                        shown[section.itemKey(index)] = row
+                        BasicText(row.value)
+                    }
+                }
+            }
+        }
+        lateinit var keys: List<Any>
+        lateinit var before: List<Row>
+        compose.runOnIdle {
+            val work = state!!.sections.single()
+            keys = (0 until work.size).map(work::itemKey)
+            before = keys.map { shown.getValue(it) }
+            list.insertSection(0, "Personal", listOf("p"))
+        }
+        compose.runOnIdle {
+            val work = state!!.sections[1]
+            assertEquals(keys, (0 until work.size).map(work::itemKey))
+            keys.forEachIndexed { index, key -> assertSame(before[index], shown.getValue(key)) }
+            assertEquals("p", shown.getValue(state!!.sections[0].itemKey(0)).value)
+            list.removeSection(0)
+        }
+        compose.runOnIdle {
+            assertEquals(keys, (0 until state!!.sections.single().size).map(state!!.sections.single()::itemKey))
+            keys.forEachIndexed { index, key -> assertSame(before[index], shown.getValue(key)) }
         }
     }
 

@@ -262,11 +262,12 @@ final class RowsSectionedDeltaCollectionDataSource: SectionedDeltaCollectionData
         super.init(collectionView: collectionView, cellProvider: cellProvider, headerProvider: headerProvider)
     }
 
-    public func collectionView(
+    override func collectionView(
         _ collectionView: UICollectionView,
         didEndDisplaying cell: UICollectionViewCell,
         forItemAt indexPath: IndexPath
     ) {
+        super.collectionView(collectionView, didEndDisplaying: cell, forItemAt: indexPath)
         stateStore.cellEndedDisplaying(cell)
     }
 }

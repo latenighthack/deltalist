@@ -33,6 +33,11 @@ func acquireDeltaItem<T: AnyObject>(_ delta: AnyObject, index: Int) -> DeltaItem
     typealias Acquire = @convention(c) (AnyObject, Selector, Int32) -> AnyObject?
     guard let acquireIMP = DeltaIMPCache.shared.imp(for: delta, acquire),
           let lease = unsafeBitCast(acquireIMP, to: Acquire.self)(delta, acquire, Int32(index)) else { return nil }
+    return deltaItemLease(lease)
+}
+
+/// Wraps a Kotlin `ItemLease` from any framework, releasing it if its item is not a [T].
+func deltaItemLease<T: AnyObject>(_ lease: AnyObject) -> DeltaItemLease<T>? {
     let itemSelector = #selector(getter: DeltaLeaseRuntimeABI.item)
     let releaseSelector = #selector(DeltaLeaseRuntimeABI.release)
     typealias Read = @convention(c) (AnyObject, Selector) -> AnyObject?

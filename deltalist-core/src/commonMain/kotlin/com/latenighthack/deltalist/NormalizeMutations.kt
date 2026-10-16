@@ -37,9 +37,20 @@ internal fun normalizeMutations(initialSize: Int, operations: List<Mutation>): L
     // Keep already valid edits, including the exact direction of explicit moves.
     if (reads.all { (index, slot) -> finalSlots.getOrNull(index) == slot }) return operations
 
+    return slotMutations((0 until initialSize).toList(), finalSlots, updated)
+}
+
+/**
+ * Running-coordinate mutations that turn [initial] into [final]. Slots are identities: a slot in
+ * [final] but not in [initial] is inserted, one only in [initial] is removed, and a shared slot
+ * moves when its position changes. Slots in [updated] that remain are updated at their final
+ * position. Both lists must be free of duplicates.
+ */
+internal fun slotMutations(initial: List<Int>, final: List<Int>, updated: Set<Int>): List<Mutation> {
     val result = mutableListOf<Mutation>()
-    val remaining = finalSlots.toSet()
-    val working = (0 until initialSize).toMutableList()
+    val remaining = final.toSet()
+    val retained = initial.toSet()
+    val working = initial.toMutableList()
     var index = 0
     while (index < working.size) {
         if (working[index] !in remaining) {
@@ -48,10 +59,10 @@ internal fun normalizeMutations(initialSize: Int, operations: List<Mutation>): L
         } else index++
     }
 
-    for ((target, slot) in finalSlots.withIndex()) {
+    for ((target, slot) in final.withIndex()) {
         when {
             working.getOrNull(target) == slot -> Unit
-            slot < 0 -> {
+            slot !in retained -> {
                 working.add(target, slot)
                 result += Mutation.Insert(target)
             }
@@ -62,8 +73,8 @@ internal fun normalizeMutations(initialSize: Int, operations: List<Mutation>): L
             }
         }
     }
-    finalSlots.forEachIndexed { position, slot ->
-        if (slot >= 0 && slot in updated) result += Mutation.Update(position)
+    final.forEachIndexed { position, slot ->
+        if (slot in retained && slot in updated) result += Mutation.Update(position)
     }
     return result
 }

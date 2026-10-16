@@ -36,7 +36,7 @@ class SectionedStableIds {
         if (!applied) reload(sections)
         headers = sections.map { it.header }
         hasBaseline = true
-        return SectionedIds(sectionIds.toList(), itemIds.map { it.toList() })
+        return SectionedIds(sectionIds.toList(), itemIds.map { it.toList() }, this)
     }
 
     private fun reload(sections: List<Section<*, *>>) {
@@ -113,7 +113,20 @@ class SectionedIds internal constructor(
     /** One id per section, in section order. */
     val sectionIds: List<Int>,
     private val itemIds: List<List<Int>>,
+    internal val tracker: SectionedStableIds,
 ) {
+    /** The id of the section at [sectionIndex]. */
+    fun sectionId(sectionIndex: Int): Int = sectionIds[sectionIndex]
+
     /** The id of the item at [itemIndex] in section [sectionIndex], loaded or not. */
     fun itemId(sectionIndex: Int, itemIndex: Int): Int = itemIds[sectionIndex][itemIndex]
 }
+
+/**
+ * Swift bridge: the ids of this emission, following the ids returned for the previous emission
+ * of the same collection. Pass null for the first emission, then the latest result each time,
+ * applying emissions in order. A native binding keeps only the returned object, which belongs to
+ * the framework that exported this delta, so it also works across Kotlin frameworks.
+ */
+fun SectionedDelta<*, *>.trackStableIds(previous: SectionedIds?): SectionedIds =
+    (previous?.tracker ?: SectionedStableIds()).apply(this)

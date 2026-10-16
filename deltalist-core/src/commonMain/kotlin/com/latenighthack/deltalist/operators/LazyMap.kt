@@ -7,6 +7,8 @@ import com.latenighthack.deltalist.DeltaList
 import com.latenighthack.deltalist.ItemLease
 import com.latenighthack.deltalist.LeasedLazyList
 import com.latenighthack.deltalist.LazyList
+import com.latenighthack.deltalist.LoadStateSoftList
+import com.latenighthack.deltalist.isLoadedWithoutMapping
 import com.latenighthack.deltalist.Mutation
 import com.latenighthack.deltalist.SoftList
 import com.latenighthack.deltalist.SoftValue
@@ -249,7 +251,10 @@ internal class LazyMapState<S, T>(
         override val size: Int,
         private val sourceAtCreation: SoftList<S>,
         private val creationEpoch: Int
-    ) : AbstractSoftList<T>(), LeasedLazyList<T> {
+    ) : AbstractSoftList<T>(), LeasedLazyList<T>, LoadStateSoftList<T> {
+
+        override fun isLoadedAt(index: Int): Boolean =
+            index in 0 until size && sourceAtCreation.isLoadedWithoutMapping(index)
 
         override fun acquire(index: Int): SoftValue<T> {
             // Bounds are validated against the per-Delta snapshot this list was created
