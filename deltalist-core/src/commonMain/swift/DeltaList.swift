@@ -144,6 +144,10 @@ public final class DeltaList<T: AnyObject>: ObservableObject {
     /// Retained so the soft-list accessors can query the live backing without re-bridging.
     private var currentDelta: AnyObject?
 
+    /// The latest emission's stable ids (Kotlin's `trackStableIds`), owned by the delta's
+    /// framework. Every emission is tracked in order, so ids follow items through its changes.
+    private var stableIds: AnyObject?
+
     private let materializesItems: Bool
     @Published public private(set) var revision: UInt = 0
 
@@ -168,6 +172,15 @@ public final class DeltaList<T: AnyObject>: ObservableObject {
         } catch {
             if !Task.isCancelled && !(error is CancellationError) { onError?(error) }
         }
+    }
+
+    /// The stable id of the slot at `index`, loaded or not. It follows its item through inserts,
+    /// removes and moves, stays the same on an update and is regenerated on a reload. Key rows by
+    /// it: reading it builds no row. A delta from a framework without the bridge falls back to the
+    /// position.
+    public func stableId(at index: Int) -> Int {
+        guard let stableIds else { return index }
+        return itemIdViaRuntime(stableIds, sectionIndex: 0, itemIndex: Int32(index))
     }
 
     // MARK: Soft-list access
@@ -238,6 +251,7 @@ public final class DeltaList<T: AnyObject>: ObservableObject {
 
     private func publish(delta: AnyObject, items: [T], total: Int, isReload: Bool) {
         currentDelta = delta
+        stableIds = trackStableIdsViaRuntime(delta, previous: stableIds)
         revision &+= 1
         if isReload {
             animatesChanges = false

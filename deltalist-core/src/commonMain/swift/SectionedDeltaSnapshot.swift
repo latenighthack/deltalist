@@ -210,7 +210,7 @@ private func triggerLoadViaRuntime(_ delta: AnyObject, sectionIndex: Int32, item
     unsafeBitCast(imp, to: Fn.self)(delta, selector, sectionIndex, itemIndex)
 }
 
-private func trackStableIdsViaRuntime(_ delta: AnyObject, previous: AnyObject?) -> AnyObject? {
+func trackStableIdsViaRuntime(_ delta: AnyObject, previous: AnyObject?) -> AnyObject? {
     typealias Fn = @convention(c) (AnyObject, Selector, AnyObject?) -> AnyObject?
     let selector = SectionedRowsSelector.trackStableIds
     guard let imp = DeltaIMPCache.shared.imp(for: delta, selector) else { return nil }
@@ -224,7 +224,7 @@ private func sectionIdViaRuntime(_ ids: AnyObject, sectionIndex: Int32) -> Int {
     return Int(unsafeBitCast(imp, to: Fn.self)(ids, selector, sectionIndex))
 }
 
-private func itemIdViaRuntime(_ ids: AnyObject, sectionIndex: Int32, itemIndex: Int32) -> Int {
+func itemIdViaRuntime(_ ids: AnyObject, sectionIndex: Int32, itemIndex: Int32) -> Int {
     typealias Fn = @convention(c) (AnyObject, Selector, Int32, Int32) -> Int32
     let selector = SectionedRowsSelector.itemId
     guard let imp = DeltaIMPCache.shared.imp(for: ids, selector) else { return Int(itemIndex) }

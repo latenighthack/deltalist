@@ -19,6 +19,13 @@ private final class LeaseProbeCell: NSCollectionViewItem {
 private typealias Row = DemoCore.BindingProbeRow
 private typealias Binding = DeltaListCore.ViewModelListBinding<Row, Row>
 
+/// A generated wrapper's shape: classifying a row builds a new wrapper each time.
+@MainActor
+private final class RowWrapper {
+    let row: Row
+    init(_ row: Row) { self.row = row }
+}
+
 @MainActor
 private final class Observations {
     var active: [String: ObjectIdentifier] = [:]
@@ -101,7 +108,7 @@ final class LifecycleTests: XCTestCase {
     }
 
     private func binding(_ probe: BindingLifecycleProbe, _ observations: Observations? = nil) -> Binding {
-        Binding(source: probe.items, classify: { $0 }, identity: { AnyHashable($0.key) },
+        Binding(source: probe.items, classify: { $0 },
                 observe: { row in if let observations { await observations.observe(row) } })
     }
 
@@ -146,10 +153,29 @@ final class LifecycleTests: XCTestCase {
         XCTAssertEqual(failures, 0)
     }
 
+    func testRowsWithoutIdentityShowEveryRow() async {
+        let probe = BindingLifecycleProbe()
+        let observations = Observations()
+        let binding = DeltaListCore.ViewModelListBinding<Row, RowWrapper>(
+            source: probe.items, classify: { RowWrapper($0) },
+            observe: { await observations.observe($0.row) })
+        var host: MountedView? = MountedView(AnyView(VStack { DeltaListCore.DeltaForEach(binding) { Text($0.row.key) } }))
+        await eventually("collector started") { probe.activeCollectors == 1 }
+        probe.reload(keys: ["Personal", "Work"])
+        await eventually("each row is observed once") {
+            observations.active.keys.sorted() == ["Personal", "Work"] && probe.acquiredCount == 2
+        }
+        probe.move(from: 1, to: 0)
+        await eventually("a move keeps both rows") { observations.active.keys.sorted() == ["Personal", "Work"] }
+        host?.close()
+        host = nil
+        await eventually("rows released") { probe.activeCollectors == 0 && probe.acquiredCount == 0 }
+    }
+
     func testErrorAndAlreadyCancelledCollection() async {
         enum Failure: Error { case expected }
         let stream = AsyncThrowingStream<AnyObject, Error> { $0.finish(throwing: Failure.expected) }
-        let binding = Binding(source: stream, classify: { $0 }, identity: { $0.key })
+        let binding = Binding(source: stream, classify: { $0 })
         let store = DeltaListCore.DeltaList<Row>()
         var failures = 0
         store.onError = { _ in failures += 1 }

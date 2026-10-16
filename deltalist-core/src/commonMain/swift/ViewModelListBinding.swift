@@ -11,11 +11,14 @@ import AppKit
 /// Semantic list operations (filtering, mapping, sorting, grouping) deliberately do not exist on
 /// this type. They belong in the ViewModel that produces the source stream. The classifier below is
 /// only the platform adaptation from a raw Kotlin child ViewModel to its generated Apple wrapper.
+///
+/// Rows are keyed by the stream's stable ids, which follow each item through the changes the
+/// ViewModel emits. A row's identity is never read from its wrapper or its raw object: a lazily
+/// mapped list builds a new object for every read, so neither is the item.
 @available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
 @MainActor
 public final class ViewModelListBinding<Raw: AnyObject, Element> {
     public typealias Classifier = @MainActor (Raw) -> Element
-    public typealias Identity = @MainActor (Element) -> AnyHashable
     public typealias Observer = @MainActor (Element) async -> Void
 
     private let collectSource: @MainActor (
@@ -23,7 +26,6 @@ public final class ViewModelListBinding<Raw: AnyObject, Element> {
         @escaping @MainActor (Error) -> Void
     ) async -> Void
     private let classifier: Classifier
-    private let identity: Identity
     private let observer: Observer
     private var elementCache: [ObjectIdentifier: Element] = [:]
 
@@ -41,11 +43,9 @@ public final class ViewModelListBinding<Raw: AnyObject, Element> {
     public init<Source: AsyncSequence>(
         source: Source,
         classify: @escaping Classifier,
-        identity: @escaping Identity,
         observe: @escaping Observer = { _ in }
     ) {
         self.classifier = classify
-        self.identity = identity
         self.observer = observe
         self.collectSource = { receive, fail in
             guard !Task.isCancelled else { return }
@@ -80,10 +80,6 @@ public final class ViewModelListBinding<Raw: AnyObject, Element> {
     /// own their wrappers, so off-screen rows can release their state subscription naturally.
     public func makeElement(for raw: Raw) -> Element {
         classifier(raw)
-    }
-
-    public func id(for element: Element) -> AnyHashable {
-        identity(element)
     }
 
     /// Observes one generated child wrapper for the lifetime of its mounted SwiftUI row.
@@ -223,19 +219,19 @@ private struct DeltaForEachRows<Raw: AnyObject, Element, RowContent: View>: View
     let rowContent: (Element) -> RowContent
 
     var body: some View {
-        ForEach(loadedSlots(binding: binding, list: list)) { slot in
+        ForEach(loadedSlots(list: list)) { slot in
             DeltaBoundRow(binding: binding, list: list, index: slot.index, rowContent: rowContent)
         }
     }
 }
 
 private struct ViewModelListSlot: Identifiable {
-    let id: AnyHashable
+    /// The slot's stable id, from the delta stream.
+    let id: Int
     let index: Int
     let loaded: Bool
 }
 
-private struct ViewModelUnloadedSlotIdentity: Hashable { let index: Int }
 private struct RowObservationIdentity: Hashable {
     let binding: ObjectIdentifier
     let raw: ObjectIdentifier
@@ -243,16 +239,14 @@ private struct RowObservationIdentity: Hashable {
 
 @available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
 @MainActor
-private func loadedSlots<Raw: AnyObject, Element>(
-    binding: ViewModelListBinding<Raw, Element>, list: DeltaList<Raw>, includeUnloaded: Bool = false
+private func loadedSlots<Raw: AnyObject>(
+    list: DeltaList<Raw>, includeUnloaded: Bool = false
 ) -> [ViewModelListSlot] {
+    // Keys come from the stream, never from a row: the mounted row owns its wrapper and lease.
     (0..<list.totalSize).compactMap { index in
-        if let raw = list.loadedItem(at: index) {
-            // Classify for identity only. The mounted row owns the retained wrapper and lease.
-            return ViewModelListSlot(id: binding.id(for: binding.makeElement(for: raw)), index: index, loaded: true)
-        }
-        return includeUnloaded ? ViewModelListSlot(
-            id: AnyHashable(ViewModelUnloadedSlotIdentity(index: index)), index: index, loaded: false) : nil
+        let loaded = list.isLoaded(at: index)
+        guard loaded || includeUnloaded else { return nil }
+        return ViewModelListSlot(id: list.stableId(at: index), index: index, loaded: loaded)
     }
 }
 
@@ -348,7 +342,7 @@ public struct DeltaLazyListView<Raw: AnyObject, Element, RowContent: View, Loadi
     }
 
     public var body: some View {
-        List(loadedSlots(binding: binding, list: list, includeUnloaded: true)) { slot in
+        List(loadedSlots(list: list, includeUnloaded: true)) { slot in
             if slot.loaded {
                 DeltaBoundRow(binding: binding, list: list, index: slot.index, rowContent: rowContent)
             } else {

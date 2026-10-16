@@ -240,7 +240,7 @@ struct InitiallyEmptyForEachDemo: View {
         }
         .navigationTitle("Initially Empty ForEach")
         .task {
-            binding = DeltaListCore.ViewModelListBinding(source: probe.items, classify: { $0 }, identity: { $0.key })
+            binding = DeltaListCore.ViewModelListBinding(source: probe.items, classify: { $0 })
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard !Task.isCancelled else { return }
             probe.append(key: "First delayed row")

@@ -130,3 +130,21 @@ class SectionedIds internal constructor(
  */
 fun SectionedDelta<*, *>.trackStableIds(previous: SectionedIds?): SectionedIds =
     (previous?.tracker ?: SectionedStableIds()).apply(this)
+
+/**
+ * Swift bridge for a flat list: the ids of this emission as one section, read with
+ * `itemId(0, index)`, following the ids returned for the previous emission of the same list. Ids
+ * follow items through inserts, removes and moves, stay the same on an update and are regenerated
+ * on a reload, as with [com.latenighthack.deltalist.operators.withStableIds]. Every position has an
+ * id, loaded or not, and no item is read, so a lazily mapped list builds no rows.
+ */
+fun Delta<*>.trackStableIds(previous: SectionedIds?): SectionedIds =
+    (previous?.tracker ?: SectionedStableIds()).apply(asOneSection())
+
+private fun Delta<*>.asOneSection(): SectionedDelta<Unit, Any?> = SectionedDelta(
+    listOf(Section(Unit, items)),
+    when (val change = change) {
+        is Change.Reload -> SectionedChange.Reload
+        is Change.Mutations -> SectionedChange.Items(0, change.operations)
+    },
+)
