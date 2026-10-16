@@ -10,6 +10,7 @@ import Foundation
     @objc(trackStableIdsPrevious:) func trackStableIds(previous: AnyObject?) -> AnyObject
     @objc(sectionIdSectionIndex:) func sectionId(sectionIndex: Int32) -> Int32
     @objc(itemIdSectionIndex:itemIndex:) func itemId(sectionIndex: Int32, itemIndex: Int32) -> Int32
+    @objc(triggerLoadAtSectionIndex:itemIndex:) func triggerLoadAt(sectionIndex: Int32, itemIndex: Int32)
 }
 
 private enum SectionedRowsSelector {
@@ -18,6 +19,7 @@ private enum SectionedRowsSelector {
     static let trackStableIds = #selector(SectionedRowsRuntimeABI.trackStableIds(previous:))
     static let sectionId = #selector(SectionedRowsRuntimeABI.sectionId(sectionIndex:))
     static let itemId = #selector(SectionedRowsRuntimeABI.itemId(sectionIndex:itemIndex:))
+    static let triggerLoad = #selector(SectionedRowsRuntimeABI.triggerLoadAt(sectionIndex:itemIndex:))
 }
 
 /// One `SectionedDelta` as a native sectioned binding reads it: headers, row counts and stable
@@ -77,6 +79,13 @@ final class SectionedDeltaSnapshot {
     func acquire<T: AnyObject>(section: Int, item: Int) -> DeltaItemLease<T>? {
         guard let delta, counts.indices.contains(section), item >= 0, item < counts[section] else { return nil }
         return acquireSectionedDeltaItem(delta, section: section, item: item)
+    }
+
+    /// Asks [section] for its slot at [item] when it isn't loaded, which fetches the next page of a
+    /// paged section. Does nothing for a loaded or absent slot, or a superseded snapshot.
+    func requestLoad(section: Int, item: Int) {
+        guard let delta, counts.indices.contains(section), item >= 0 else { return }
+        triggerLoadViaRuntime(delta, sectionIndex: Int32(section), itemIndex: Int32(item))
     }
 
     /// The row at [item] of [section] through the cache: the cached row while anything leases
@@ -191,6 +200,14 @@ private func loadedItemCountViaRuntime(_ delta: AnyObject, sectionIndex: Int32) 
         return itemCountViaRuntime(delta, sectionIndex: sectionIndex)
     }
     return Int(unsafeBitCast(imp, to: Fn.self)(delta, selector, sectionIndex))
+}
+
+private func triggerLoadViaRuntime(_ delta: AnyObject, sectionIndex: Int32, itemIndex: Int32) {
+    typealias Fn = @convention(c) (AnyObject, Selector, Int32, Int32) -> Void
+    let selector = SectionedRowsSelector.triggerLoad
+    // Older frameworks can't page sections; their sections hold every row they have.
+    guard let imp = DeltaIMPCache.shared.imp(for: delta, selector) else { return }
+    unsafeBitCast(imp, to: Fn.self)(delta, selector, sectionIndex, itemIndex)
 }
 
 private func trackStableIdsViaRuntime(_ delta: AnyObject, previous: AnyObject?) -> AnyObject? {

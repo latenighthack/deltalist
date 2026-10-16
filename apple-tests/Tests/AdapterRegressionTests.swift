@@ -127,6 +127,27 @@ final class AdapterRegressionTests: XCTestCase {
         XCTAssertEqual((0..<3).map { fixture.collection.numberOfItems(inSection: $0) }, [3, 2, 1])
     }
 
+    #if canImport(UIKit)
+    /// A paged section loads its next page when its last loaded row shows, and a section with no rows
+    /// asks for its first, so every page of a short paged list loads with no scrolling.
+    func testSectionedPagesLoadAsEachSectionsLastRowShows() async {
+        let probe = DemoCore.SectionedPagingProbe()
+        let fixture = CollectionFixture()
+        let dataSource = DeltaListCore.SectionedDeltaCollectionDataSource<NSString, NSString>(
+            collectionView: fixture.collection, cellProvider: { _, path, value in fixture.item(path, text: value as String) })
+        defer { dataSource.unbind(); fixture.close() }
+        dataSource.bind(to: probe.sections)
+        await eventually("every page fetched") { probe.fetched.count == 3 }
+        await eventually("every row shown") {
+            fixture.collection.numberOfSections == 2 &&
+                fixture.collection.numberOfItems(inSection: 0) == 3 &&
+                fixture.collection.numberOfItems(inSection: 1) == 3
+        }
+        XCTAssertEqual(probe.fetched, [0, 1, 2])
+        XCTAssertEqual(fixture.rendered(IndexPath(item: 2, section: 1)), "5")
+    }
+    #endif
+
     func testSectionedRowsKeepTheirObjectsAndKeysAcrossDeltas() async {
         typealias ProbeRow = DemoCore.SectionedProbeRow
         let probe = DemoCore.SectionedBindingProbe()

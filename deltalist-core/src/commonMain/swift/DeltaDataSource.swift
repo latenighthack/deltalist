@@ -602,9 +602,28 @@ public class SectionedDeltaCollectionDataSource<H: AnyObject, T: AnyObject>: NSO
         guard hasReceivedInitialData, let change, newSections.count == next.headers.count else {
             hasReceivedInitialData = true
             reloadAll()
+            requestLoadsAtVisibleEnds()
             return
         }
         applySectionedChange(change, oldSections: oldSections, oldItemCounts: oldItemCounts)
+        requestLoadsAtVisibleEnds()
+    }
+
+    // MARK: - Paging
+    // A section's counts are its loaded rows. A paged section's next page loads when its last
+    // loaded row shows, by asking for the slot after it, as the flat data source asks for the
+    // loading cells it shows. A section with no rows yet asks for its first.
+
+    /// Asks every section whose loaded end is on screen, or which has no rows, for its next slot.
+    private func requestLoadsAtVisibleEnds() {
+        guard let collectionView else { return }
+        let visible = Set(collectionView.indexPathsForVisibleItems)
+        for section in snapshot.counts.indices {
+            let count = snapshot.counts[section]
+            if count == 0 || visible.contains(IndexPath(item: count - 1, section: section)) {
+                snapshot.requestLoad(section: section, item: count)
+            }
+        }
     }
 
     /// Reloads every section. Rows that stay visible keep their cached objects.
@@ -778,6 +797,14 @@ public class SectionedDeltaCollectionDataSource<H: AnyObject, T: AnyObject>: NSO
     }
 
     // MARK: - UICollectionViewDelegate
+
+    public func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        guard snapshot.counts.indices.contains(indexPath.section) else { return }
+        let count = snapshot.counts[indexPath.section]
+        if indexPath.item == count - 1 {
+            snapshot.requestLoad(section: indexPath.section, item: count)
+        }
+    }
 
     public func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
         leases.release(for: cell)

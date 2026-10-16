@@ -262,6 +262,19 @@ fun <T> Delta<T>.triggerLoadAt(index: Int) {
     }
 }
 
+/**
+ * Asks section [sectionIndex] for its item at [itemIndex] when that slot isn't loaded yet, as a
+ * native binding does when it reaches the end of a section's loaded rows: the slot's request()
+ * fetches the next page. A loaded or absent slot is left alone.
+ * This is safe to call from iOS - pass the SectionedDelta directly to avoid bridging issues.
+ */
+fun <S, T> SectionedDelta<S, T>.triggerLoadAt(sectionIndex: Int, itemIndex: Int) {
+    val softValue = sections.getOrNull(sectionIndex)?.items?.softGetOrNull(itemIndex)
+    if (softValue is SoftValue.NotLoaded) {
+        softValue.request()
+    }
+}
+
 // ============================================================================
 // SectionedDelta helpers - these avoid iOS bridging issues
 // when accessing delta.sections from Swift
