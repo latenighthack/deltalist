@@ -25,7 +25,8 @@ private struct NotifierRegressionTests {
         testKeyedItemsReconcileOnTheirKeys()
         testReloadRepostsOnlyChangedSurvivors()
         await testFirstRenderWaitsForTheFirstState()
-        print("NotifierRegressionTests: 7 passed")
+        testReplacementRendersOnlyWithItsOwnState()
+        print("NotifierRegressionTests: 8 passed")
     }
 
     // Sleeping for a fixed interval can resume the test before a delayed flush task has even
@@ -174,6 +175,33 @@ private struct NotifierRegressionTests {
         await eventually("A later state re-posts, not as a first render") {
             recorder.operations == ["post:pnt_a", "post:pnt_a"] && recorder.firstRenders == ["pnt_a"]
         }
+        controller.stop()
+    }
+
+    @MainActor private static func testReplacementRendersOnlyWithItsOwnState() {
+        let recorder = Recorder()
+        var emitters: [ObjectIdentifier: (Any?) -> Void] = [:]
+        var states: [Any?] = []
+        let sink = NotificationSink(
+            post: { key, _, state, _ in recorder.operations.append("post:\(key)"); states.append(state) },
+            cancel: { key in recorder.operations.append("cancel:\(key)") }
+        )
+        let controller = TrayController(
+            sink: sink,
+            key: { ($0 as! Push).notificationId },
+            shouldRepost: { ($0 as! Push).revision != ($1 as! Push).revision },
+            stateSubscribe: { item, emit in emitters[ObjectIdentifier(item)] = emit; return Task {} },
+            stateInitial: nil, rateLimitPerSecond: 8)
+        let first = Push("pnt_a")
+        controller.applyDelta(items: [first])
+        emitters[ObjectIdentifier(first)]?("old")
+        let replacement = Push("pnt_a", 2)
+        controller.applyDelta(items: [replacement])
+        precondition(recorder.operations == ["post:pnt_a"],
+                     "A replacement must not re-post with the old item's state, got \(recorder.operations)")
+        emitters[ObjectIdentifier(replacement)]?("new")
+        precondition(recorder.operations == ["post:pnt_a", "post:pnt_a"] && states.last as? String == "new",
+                     "A replacement renders with its own first state")
         controller.stop()
     }
 }

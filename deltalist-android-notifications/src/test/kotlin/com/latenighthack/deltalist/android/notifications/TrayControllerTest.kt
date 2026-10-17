@@ -216,6 +216,31 @@ class TrayControllerTest {
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     @Test
+    fun without_an_initial_state_a_replacement_renders_only_with_its_own_state() = runTest {
+        class Item(val id: String, val label: String, val state: MutableStateFlow<Any?>)
+        val sink = FakeSink<Item, Item>()
+        val tray = keyedController(
+            sink,
+            key = { it.id },
+            scope = backgroundScope,
+            stateAccessor = { it.state },
+            shouldRepost = { old, new -> old.label != new.label },
+        )
+        tray.applyDelta(mutations(listOf(Item("pnt_a", "a", MutableStateFlow("old"))), Mutation.Insert(0)))
+        advanceTimeBy(130); runCurrent()
+        sink.ops.clear()
+
+        tray.applyDelta(mutations(listOf(Item("pnt_a", "review", MutableStateFlow("new"))), Mutation.Update(0)))
+        assertTrue(sink.ops.isEmpty(), "re-posted with the old item's state, got ${sink.ops}")
+
+        advanceTimeBy(130); runCurrent()
+        assertEquals(listOf("post:pnt_a"), sink.ops)
+        assertEquals("new", sink.states["pnt_a"])
+        assertEquals(listOf("pnt_a"), sink.firstRenders)
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
     fun without_an_initial_state_the_first_render_waits_for_the_first_state() = runTest {
         class Item(val id: String, val isShown: MutableStateFlow<Any?>)
         val sink = FakeSink<Item, Item>()

@@ -29,8 +29,9 @@ import kotlinx.coroutines.launch
  * still goes through [shouldRepost].
  *
  * An item's first render may adopt a notification already in the tray (see the sink); later
- * renders post. With an [stateAccessor] but no [stateInitial], an item's first render waits
- * for its first state.
+ * renders post. With an [stateAccessor] but no [stateInitial], an item renders only with its
+ * own state: its first render waits for its first state, and a replacement's for the
+ * replacement's.
  *
  * Because [com.latenighthack.deltalist.operators.withStableIds] regenerates ids on Reload,
  * a stable-id notifier's Reload degrades to cancel-old + post-new.
@@ -52,6 +53,8 @@ internal class TrayController<E, T>(
         var state: Any?,
         var stateJob: Job?,
         var isRendered: Boolean,
+        // False from a replacement until the replacement's own state arrives.
+        var isStateCurrent: Boolean = true,
     )
 
     private val samplePeriodMs: Long = (1000L / rateLimitPerSecond.coerceAtLeast(1)).coerceAtLeast(1L)
@@ -102,10 +105,12 @@ internal class TrayController<E, T>(
                     existing.stateJob?.cancel()
                     existing.stateJob = null
                     stateInitial?.let { existing.state = it(value) }
+                    if (waitsForFirstState) existing.isStateCurrent = false
                 }
                 existing.value = value
                 rebuilt[key] = existing
-                if (existing.isRendered && (isChanged || existing.state != oldState)) {
+                val isRepost = isChanged || existing.state != oldState
+                if (existing.isRendered && existing.isStateCurrent && isRepost) {
                     sink.post(key, existing.value, existing.state, isFirst = false)
                 }
                 if (isReplaced) startStateJob(existing)
@@ -146,11 +151,10 @@ internal class TrayController<E, T>(
             accessor(entry.value)
                 .sample(samplePeriodMs)
                 .collect { newState ->
-                    if (!entry.isRendered) {
+                    val isWaiting = !entry.isRendered || !entry.isStateCurrent
+                    if (isWaiting || newState != entry.state) {
                         entry.state = newState
-                        render(entry)
-                    } else if (newState != entry.state) {
-                        entry.state = newState
+                        entry.isStateCurrent = true
                         render(entry)
                     }
                 }

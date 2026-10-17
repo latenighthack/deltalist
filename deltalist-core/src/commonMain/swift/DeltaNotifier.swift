@@ -244,6 +244,8 @@ final class TrayEntry {
     var item: AnyObject
     var state: Any?
     var isRendered = false
+    // False from a replacement until the replacement's own state arrives.
+    var isStateCurrent = true
     var stateTask: Task<Void, Never>?
     var stateGeneration = UUID()
     var lastPostAt: Date?
@@ -262,8 +264,8 @@ final class TrayEntry {
 /// dictionary replaces the ordered map).
 ///
 /// A survivor re-posts only when `shouldRepost` says so, or its state changed; a reload doesn't
-/// force one. With a state subscription but no initial state, an item's first render waits for
-/// its first state.
+/// force one. With a state subscription but no initial state, an item renders only with its own
+/// state: its first render waits for its first state, and a replacement's for the replacement's.
 @available(iOS 14.0, *)
 @MainActor
 final class TrayController {
@@ -324,10 +326,12 @@ final class TrayController {
                     existing.pendingFlush = nil
                     existing.pendingState = nil
                     if let stateInitial = stateInitial { existing.state = stateInitial(item) }
+                    if waitsForFirstState { existing.isStateCurrent = false }
                     existing.lastPostAt = nil
                 }
                 existing.item = item
-                if existing.isRendered && (valueChanged || (replaced && !statesEqual(oldState, existing.state))) {
+                let isRepost = valueChanged || (replaced && !statesEqual(oldState, existing.state))
+                if existing.isRendered && existing.isStateCurrent && isRepost {
                     sink.post(key, item, existing.state, false)
                 }
                 if replaced { startStateTask(existing) }
@@ -378,10 +382,11 @@ final class TrayController {
 
     // Trailing-edge throttle: coalesce rapid emissions to at most one re-post per sample period,
     // always applying the most recent value. Equivalent to the Kotlin `sample()`. An item still
-    // waiting for its first state renders with it at once.
+    // waiting for its own state renders with it at once.
     private func onState(_ entry: TrayEntry, _ newState: Any?) {
-        if !entry.isRendered {
+        if !entry.isRendered || !entry.isStateCurrent {
             entry.state = newState
+            entry.isStateCurrent = true
             entry.lastPostAt = Date()
             render(entry)
             return
