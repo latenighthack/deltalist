@@ -2,8 +2,7 @@ package com.latenighthack.deltalist.android.notifications
 
 import com.latenighthack.deltalist.Change
 import com.latenighthack.deltalist.Delta
-import com.latenighthack.deltalist.Stable
-import com.latenighthack.deltalist.softLoadedItems
+import com.latenighthack.deltalist.acquireLoadedItems
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -16,84 +15,100 @@ import kotlinx.coroutines.launch
  * [NotificationSink]. This is the only piece of stateful sequencing logic, and it is pure
  * Kotlin (no Android types) so it can be unit-tested directly.
  *
- * Reconciliation is keyed on [Stable.stableId] rather than the raw mutation indices.
+ * Reconciliation is keyed on each item's tray key rather than the raw mutation indices.
  * This yields the same observable tray result as a positional translation (Insert -> post,
- * Update -> re-post same id, Remove -> cancel, Move -> no-op, Reload -> diff) while being
- * robust to multiple mutations batched in a single [Change.Mutations]:
- *  - an id present now but not before -> post (Insert)
- *  - an id present before but not now -> cancel (Remove)
- *  - a surviving id whose value instance changed, or any survivor on Reload -> re-post (Update)
- *  - a surviving id with the same value instance -> no-op (Move / unrelated mutation)
+ * Update -> re-post same key, Remove -> cancel, Move -> no-op) while being robust to multiple
+ * mutations batched in a single [Change.Mutations]:
+ *  - a key present now but not before -> render (Insert)
+ *  - a key present before but not now -> cancel (Remove)
+ *  - a surviving key whose value [shouldRepost] says changed -> re-post (Update)
+ *  - any other survivor -> no-op (Move, Reload, unrelated mutation)
+ *
+ * Items are read through the list's lazy cache ([acquireLoadedItems]), so a `lazyMap`ped row
+ * keeps its object across deltas. A Reload doesn't force a re-post on its own: each survivor
+ * still goes through [shouldRepost].
+ *
+ * An item's first render may adopt a notification already in the tray (see the sink); later
+ * renders post. With an [stateAccessor] but no [stateInitial], an item's first render waits
+ * for its first state.
  *
  * Because [com.latenighthack.deltalist.operators.withStableIds] regenerates ids on Reload,
- * a Reload degrades to cancel-old + post-new (a brief tray refresh) rather than in-place
- * updates — an accepted limitation of using session-stable ids as the tray identity.
+ * a stable-id notifier's Reload degrades to cancel-old + post-new.
  */
-internal class TrayController<E : Stable, T>(
+internal class TrayController<E, T>(
     private val scope: CoroutineScope,
     private val sink: NotificationSink<E, T>,
     private val grouped: Boolean,
+    private val keyOf: (E) -> String,
+    private val shouldRepost: (old: T, new: T) -> Boolean,
     private val stateAccessor: ((T) -> Flow<Any?>)?,
     private val stateInitial: ((T) -> Any?)?,
     rateLimitPerSecond: Int,
     private val valueOf: (E) -> T,
 ) {
     private class Entry<T>(
-        val stableId: Int,
+        val key: String,
         var value: T,
         var state: Any?,
         var stateJob: Job?,
+        var isRendered: Boolean,
     )
 
     private val samplePeriodMs: Long = (1000L / rateLimitPerSecond.coerceAtLeast(1)).coerceAtLeast(1L)
 
-    // Ordered by current list position; keyed by stableId for O(1) reconciliation.
-    private val entries = LinkedHashMap<Int, Entry<T>>()
+    // An item's first render waits for its first state only when there's no initial state.
+    private val waitsForFirstState: Boolean = stateAccessor != null && stateInitial == null
 
-    fun valueFor(stableId: Int): T? = entries[stableId]?.value
+    // Ordered by current list position; keyed by tray key for O(1) reconciliation.
+    private val entries = LinkedHashMap<String, Entry<T>>()
+
+    fun valueFor(key: String): T? = entries[key]?.value
 
     fun applyDelta(delta: Delta<E>) {
-        val forceRepost = delta.change is Change.Reload
-        // The notification tray needs every item; notifications are fully loaded, so
-        // materialize the soft snapshot's loaded items into an ordinary list.
-        val newItems = delta.items.softLoadedItems()
-        val newIds = HashSet<Int>(newItems.size).apply { newItems.forEach { add(it.stableId) } }
+        // The notification tray needs every item, read through the lazy cache so each
+        // listed item keeps its object between deltas.
+        val newItems = delta.items.acquireLoadedItems()
+        val newKeys = HashSet<String>(newItems.size).apply { newItems.forEach { add(keyOf(it)) } }
 
-        // Cancel ids that are gone.
+        // Cancel keys that are gone.
         val iterator = entries.entries.iterator()
         while (iterator.hasNext()) {
             val entry = iterator.next().value
-            if (entry.stableId !in newIds) {
+            if (entry.key !in newKeys) {
                 entry.stateJob?.cancel()
-                sink.cancel(entry.stableId)
+                sink.cancel(entry.key)
                 iterator.remove()
             }
         }
 
-        // Re-key in the new order; post inserts and re-post changed survivors.
-        val rebuilt = LinkedHashMap<Int, Entry<T>>(newItems.size)
+        // Re-key in the new order; render inserts and re-post changed survivors.
+        val rebuilt = LinkedHashMap<String, Entry<T>>(newItems.size)
         for (item in newItems) {
-            val id = item.stableId
+            val key = keyOf(item)
             val value = valueOf(item)
-            val existing = entries[id]
+            val existing = entries[key]
             if (existing == null) {
-                val entry = Entry(id, value, stateInitial?.invoke(value), null)
-                rebuilt[id] = entry
-                sink.post(id, entry.value, entry.state)
+                val entry = Entry(key, value, stateInitial?.invoke(value), null, isRendered = false)
+                rebuilt[key] = entry
+                if (!waitsForFirstState) render(entry)
                 startStateJob(entry)
             } else {
-                val valueChanged = existing.value !== value
-                if (valueChanged) {
+                val isReplaced = existing.value !== value
+                val isChanged = shouldRepost(existing.value, value)
+                val oldState = existing.state
+                if (isReplaced) {
+                    // Ownership of the observation follows the item, independently of the
+                    // caller's value-equality policy for re-posts.
                     existing.stateJob?.cancel()
                     existing.stateJob = null
-                    existing.state = stateInitial?.invoke(value)
+                    stateInitial?.let { existing.state = it(value) }
                 }
                 existing.value = value
-                rebuilt[id] = existing
-                if (valueChanged || forceRepost) {
-                    sink.post(id, existing.value, existing.state)
+                rebuilt[key] = existing
+                if (existing.isRendered && (isChanged || existing.state != oldState)) {
+                    sink.post(key, existing.value, existing.state, isFirst = false)
                 }
-                if (valueChanged) startStateJob(existing)
+                if (isReplaced) startStateJob(existing)
             }
         }
         entries.clear()
@@ -108,7 +123,7 @@ internal class TrayController<E : Stable, T>(
 
     /** Cancel everything in the tray and drop all state. */
     fun cancelAll() {
-        entries.values.forEach { it.stateJob?.cancel(); sink.cancel(it.stableId) }
+        entries.values.forEach { it.stateJob?.cancel(); sink.cancel(it.key) }
         entries.clear()
         if (grouped) sink.cancelSummary()
     }
@@ -118,6 +133,12 @@ internal class TrayController<E : Stable, T>(
         entries.values.forEach { it.stateJob?.cancel(); it.stateJob = null }
     }
 
+    private fun render(entry: Entry<T>) {
+        val isFirst = !entry.isRendered
+        entry.isRendered = true
+        sink.post(entry.key, entry.value, entry.state, isFirst)
+    }
+
     @OptIn(FlowPreview::class)
     private fun startStateJob(entry: Entry<T>) {
         val accessor = stateAccessor ?: return
@@ -125,9 +146,12 @@ internal class TrayController<E : Stable, T>(
             accessor(entry.value)
                 .sample(samplePeriodMs)
                 .collect { newState ->
-                    if (newState != entry.state) {
+                    if (!entry.isRendered) {
                         entry.state = newState
-                        sink.post(entry.stableId, entry.value, newState)
+                        render(entry)
+                    } else if (newState != entry.state) {
+                        entry.state = newState
+                        render(entry)
                     }
                 }
         }

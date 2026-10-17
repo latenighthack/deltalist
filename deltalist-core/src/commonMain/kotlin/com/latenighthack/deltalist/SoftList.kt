@@ -200,6 +200,13 @@ fun <T> SoftList<T>.softLoadedItems(): List<T> {
 fun <T> Delta<T>.loadedItems(): List<T> = items.softLoadedItems()
 
 /**
+ * Returns the loaded items from a Delta through its lazy cache, each acquired once while
+ * listed (see [acquireLoadedItems]), so a binding that keeps every item sees the same objects
+ * across deltas. This is safe to call from iOS - pass the Delta directly to avoid bridging issues.
+ */
+fun <T> Delta<T>.acquireLoadedItems(): List<T> = items.acquireLoadedItems()
+
+/**
  * Returns the count of loaded items in a Delta.
  * This is safe to call from iOS - pass the Delta directly to avoid bridging issues.
  */

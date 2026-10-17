@@ -17,6 +17,7 @@ import Combine
 @objc public protocol DeltaProtocol {
     var change: Change { get }
     func loadedItems() -> [Any]
+    func acquireLoadedItems() -> [Any]
     func totalSize() -> Int32
     func isLoadedAt(index: Int32) -> Bool
     func getLoadedItemAt(index: Int32) -> Any?
@@ -56,6 +57,7 @@ import Combine
 /// Compile-time-checked selectors for the exported Kotlin `Delta` / `SectionedDelta` accessors.
 enum DeltaSelector {
     static let loadedItems = #selector(DeltaProtocol.loadedItems)
+    static let acquireLoadedItems = #selector(DeltaProtocol.acquireLoadedItems)
     static let totalSize = #selector(DeltaProtocol.totalSize)
     static let change = #selector(getter: DeltaProtocol.change)
     static let isLoadedAt = #selector(DeltaProtocol.isLoadedAt(index:))

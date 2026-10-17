@@ -12,12 +12,14 @@ import androidx.core.app.NotificationCompat
  * pre-wired with the channel, group, and the durable back-channel intents (body tap +
  * dismissal). You only set the visual content.
  *
- * @property stableId the item's session-stable id (also the tray notification id base).
+ * @property key the item's tray key: its durable key, or its stable id's digits.
+ * @property stableId the item's session-stable id, or null for a keyed notifier.
  * @property state the latest value emitted by `itemState { }`, or null if none.
  */
 class NotificationScope<T> internal constructor(
     val context: Context,
-    val stableId: Int,
+    val key: String,
+    val stableId: Int?,
     val state: Any?,
     private val config: NotifierConfig<T>,
 ) {
@@ -61,12 +63,13 @@ class NotificationScope<T> internal constructor(
                 .scheme("deltalist-notification")
                 .authority(context.packageName)
                 .appendPath(config.tag)
-                .appendPath(stableId.toString())
+                .appendPath(key)
                 .appendPath(type.name)
                 .appendPath(actionKey ?: "")
                 .build()
             putExtra(EXTRA_TAG, config.tag)
-            putExtra(EXTRA_STABLE_ID, stableId)
+            putExtra(EXTRA_KEY, key)
+            stableId?.let { putExtra(EXTRA_STABLE_ID, it) }
             putExtra(EXTRA_TYPE, type.name)
             actionKey?.let { putExtra(EXTRA_ACTION_KEY, it) }
         }

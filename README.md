@@ -156,6 +156,54 @@ collectionView.items(model.items, item: ItemCollectionViewItem.self)
 Polymorphic bindings use a reusable `DeltaUICollectionViewCellMap` or
 `DeltaNSCollectionViewItemMap`; the binding element is a generated, exhaustive, list-specific enum.
 
+### Notification tray (Android and Apple)
+
+A notifier makes the system tray another view of a list. An inserted item posts, an update
+re-posts under the same identifier, a removal cancels, and a move does nothing. The Android notifier
+is in `deltalist-android-notifications`; the Apple one, `DeltaNotifier`, ships in `DeltaListCore`.
+
+For notifications that outlive the process, such as remote pushes, key each item by a durable ID.
+The key is the notification's identity: the Android tag (with id `idBase`) and the iOS identifier,
+used verbatim. The binding then works with notifications it didn't post:
+
+- `adoptDelivered` adopts an item's notification that the tray already shows, such as one the OS
+  displayed from a remote push or an earlier process posted, rather than posting it again. Only an
+  item's first render adopts.
+- `content` returning null (Swift: nil) keeps an item off the tray. Its notification is cancelled
+  whether or not this notifier posted it, so list an item hidden rather than filtering it out.
+- `itemState` without an initial value makes an item's first render wait for its first state.
+- Survivors re-post only when `shouldRepost(old, new)` accepts them, on an update or a reload.
+- `operations` reports each post, adoption and cancellation, so a caller that's about to lose its
+  process (a push service, a notification action) can wait for the tray to apply its change.
+
+Items are read through the list's lazy cache, so a `lazyMap`ped row keeps its object between
+deltas.
+
+```kotlin
+// Android: bound for the application's lifetime, not a screen's
+requests.notifier(context, key = { it.notificationId }) {
+    channel("requests", "Requests", NotificationManagerCompat.IMPORTANCE_HIGH)
+    adoptDelivered { request, delivered -> request.matches(delivered.notification.extras) }
+    itemState(accessor = { it.isShown })
+    content { request -> if (state != true) null else notification { setContentTitle(request.title) } }
+}.bind(applicationScope)
+```
+
+```swift
+// Apple
+let notifier = DeltaNotifier<RequestItem>(tag: "requests", key: { $0.notificationId }) { scope in
+    guard scope.state as? Bool == true else { return nil }
+    return scope.content { $0.title = scope.item.title }
+}
+.adoptDelivered { request, delivered in request.matches(delivered.request.content.userInfo) }
+.itemState { $0.isShown }
+.bind(erased: viewModel.requests)
+```
+
+The stable-id forms (`withStableIds().notifier(context) { … }`, and
+`DeltaNotifier(tag:idBase:stableId:…)`) name notifications `tag#(idBase + stableId)`. Those IDs
+belong to the session, which suits notifications the app posts and clears while it runs.
+
 ### React
 
 The `useDeltaList` hook (`deltalist-react`) returns one stable JavaScript `Proxy` that delegates

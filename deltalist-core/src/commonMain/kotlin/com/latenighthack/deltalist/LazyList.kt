@@ -69,3 +69,29 @@ fun <T> SoftList<T>.releaseIfLazy(index: Int) {
 fun <T> SoftList<T>.releaseAllIfLazy() {
     (this as? LazyList<*>)?.releaseAll()
 }
+
+/**
+ * The contiguous loaded prefix, read through a [LazyList]'s cache, for a binding that keeps
+ * every listed item (such as a notification tray) rather than the ones on screen.
+ *
+ * Each item is acquired once while it's listed: an item already acquired is read without
+ * raising its count. Later snapshots therefore return the same object until the item is
+ * updated, removed or reloaded, where [softLoadedItems] builds a fresh one on every read.
+ * The cache belongs to the binding's own collection, so it goes when the collection ends.
+ * A plain soft list returns its loaded items.
+ */
+fun <T> SoftList<T>.acquireLoadedItems(): List<T> {
+    if (this !is LazyList<T>) return softLoadedItems()
+    val result = mutableListOf<T>()
+    for (i in 0 until size) {
+        val wasAcquired = isAcquired(i)
+        when (val soft = acquire(i)) {
+            is SoftValue.Present -> {
+                if (wasAcquired) release(i)
+                result.add(soft.value)
+            }
+            is SoftValue.NotLoaded -> break
+        }
+    }
+    return result
+}

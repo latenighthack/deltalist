@@ -5,7 +5,9 @@ import com.latenighthack.deltalist.Delta
 import com.latenighthack.deltalist.Mutation
 import com.latenighthack.deltalist.Stable
 import com.latenighthack.deltalist.StableItem
+import com.latenighthack.deltalist.operators.lazyMap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.advanceTimeBy
@@ -23,20 +25,22 @@ private class Box(val label: String)
 /** A self-identifying item used to exercise the raw [Stable] path (no [StableItem] wrapper). */
 private data class RawItem(override val stableId: Int, val label: String) : Stable
 
-private class FakeSink<E : Stable, T> : NotificationSink<E, T> {
+private class FakeSink<E, T> : NotificationSink<E, T> {
     val ops = mutableListOf<String>()
-    val states = mutableMapOf<Int, Any?>()
+    val states = mutableMapOf<String, Any?>()
+    val firstRenders = mutableListOf<String>()
     var postCount = 0
     val summaries = mutableListOf<List<E>>()
 
-    override fun post(stableId: Int, value: T, state: Any?) {
-        ops.add("post:$stableId")
-        states[stableId] = state
+    override fun post(key: String, value: T, state: Any?, isFirst: Boolean) {
+        ops.add("post:$key")
+        states[key] = state
+        if (isFirst) firstRenders.add(key)
         postCount++
     }
 
-    override fun cancel(stableId: Int) {
-        ops.add("cancel:$stableId")
+    override fun cancel(key: String) {
+        ops.add("cancel:$key")
     }
 
     override fun postSummary(items: List<E>) {
@@ -56,7 +60,25 @@ private fun <T> controller(
     stateAccessor: ((T) -> Flow<Any?>)? = null,
     stateInitial: ((T) -> Any?)? = null,
     rateLimitPerSecond: Int = 8,
-) = TrayController(scope, sink, grouped, stateAccessor, stateInitial, rateLimitPerSecond, valueOf = { it.value })
+    shouldRepost: (T, T) -> Boolean = { old, new -> old !== new },
+) = TrayController(
+    scope, sink, grouped, keyOf = { it.stableId.toString() }, shouldRepost = shouldRepost,
+    stateAccessor = stateAccessor, stateInitial = stateInitial, rateLimitPerSecond = rateLimitPerSecond,
+    valueOf = { it.value },
+)
+
+/** A keyed controller over the items themselves, as `notifier(context, key)` builds it. */
+private fun <T> keyedController(
+    sink: FakeSink<T, T>,
+    key: (T) -> String,
+    scope: kotlinx.coroutines.CoroutineScope = kotlinx.coroutines.CoroutineScope(Dispatchers.Unconfined),
+    stateAccessor: ((T) -> Flow<Any?>)? = null,
+    stateInitial: ((T) -> Any?)? = null,
+    shouldRepost: (T, T) -> Boolean = { old, new -> old !== new },
+) = TrayController(
+    scope, sink, grouped = false, keyOf = key, shouldRepost = shouldRepost,
+    stateAccessor = stateAccessor, stateInitial = stateInitial, rateLimitPerSecond = 8, valueOf = { it },
+)
 
 private fun <E> mutations(items: List<E>, vararg ops: Mutation): Delta<E> =
     Delta(items, Change.Mutations(ops.toList()))
@@ -132,7 +154,7 @@ class TrayControllerTest {
     }
 
     @Test
-    fun reload_with_same_ids_force_reposts() {
+    fun reload_with_same_items_does_not_repost() {
         val sink = FakeSink<Wrapped<Box>, Box>()
         val tray = controller(sink)
         val a = Wrapped(1, Box("a"))
@@ -140,9 +162,78 @@ class TrayControllerTest {
         tray.applyDelta(reload(listOf(a, b)))
         sink.ops.clear()
 
-        tray.applyDelta(reload(listOf(a, b)))
+        tray.applyDelta(reload(listOf(a, Wrapped(2, Box("b2")))))
 
-        assertEquals(listOf("post:1", "post:2"), sink.ops)
+        assertEquals(listOf("post:2"), sink.ops)
+    }
+
+    @Test
+    fun value_equal_survivors_do_not_repost_with_value_should_repost() {
+        data class Snapshot(val id: String, val revision: Int)
+        val sink = FakeSink<Snapshot, Snapshot>()
+        val tray = keyedController(sink, key = { it.id }, shouldRepost = { old, new -> old != new })
+        tray.applyDelta(reload(listOf(Snapshot("pnt_a", 1), Snapshot("pnt_b", 1))))
+        sink.ops.clear()
+
+        // Fresh but equal instances, and one real change.
+        tray.applyDelta(reload(listOf(Snapshot("pnt_a", 1), Snapshot("pnt_b", 2))))
+
+        assertEquals(listOf("post:pnt_b"), sink.ops)
+    }
+
+    @Test
+    fun keyed_items_reconcile_on_their_keys_and_mark_only_first_renders() {
+        data class Push(val notificationId: String, val title: String)
+        val sink = FakeSink<Push, Push>()
+        val tray = keyedController(sink, key = { it.notificationId })
+        val a = Push("pnt_a", "a")
+        val b = Push("pnt_b", "b")
+        tray.applyDelta(mutations(listOf(a), Mutation.Insert(0)))
+        tray.applyDelta(mutations(listOf(Push("pnt_a", "a2"), b), Mutation.Update(0), Mutation.Insert(1)))
+        tray.applyDelta(mutations(listOf(b), Mutation.Remove(0)))
+
+        assertEquals(listOf("post:pnt_a", "post:pnt_a", "post:pnt_b", "cancel:pnt_a"), sink.ops)
+        assertEquals(listOf("pnt_a", "pnt_b"), sink.firstRenders)
+    }
+
+    @Test
+    fun lazy_mapped_rows_keep_their_objects_so_unrelated_changes_do_not_repost() = kotlinx.coroutines.test.runTest {
+        class Row(val id: String)
+        val sink = FakeSink<Row, Row>()
+        val tray = keyedController(sink, key = { it.id })
+        val source = com.latenighthack.deltalist.mutableDeltaListOf(listOf("a", "b"))
+        val job = launch { source.lazyMap { Row(it) }.collect { tray.applyDelta(it) } }
+        runCurrent()
+        assertEquals(listOf("post:a", "post:b"), sink.ops)
+        sink.ops.clear()
+
+        source.append("c")
+        runCurrent()
+
+        assertEquals(listOf("post:c"), sink.ops)
+        job.cancel()
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
+    fun without_an_initial_state_the_first_render_waits_for_the_first_state() = runTest {
+        class Item(val id: String, val isShown: MutableStateFlow<Any?>)
+        val sink = FakeSink<Item, Item>()
+        val shown = MutableStateFlow<Any?>(false)
+        val tray = keyedController(sink, key = { it.id }, scope = backgroundScope, stateAccessor = { it.isShown })
+
+        tray.applyDelta(mutations(listOf(Item("pnt_a", shown)), Mutation.Insert(0)))
+        assertTrue(sink.ops.isEmpty(), "rendered before its state, got ${sink.ops}")
+
+        advanceTimeBy(130); runCurrent()
+        assertEquals(listOf("post:pnt_a"), sink.ops)
+        assertEquals(false, sink.states["pnt_a"])
+        assertEquals(listOf("pnt_a"), sink.firstRenders)
+
+        shown.value = true
+        advanceTimeBy(130); runCurrent()
+        assertEquals(listOf("post:pnt_a", "post:pnt_a"), sink.ops)
+        assertEquals(listOf("pnt_a"), sink.firstRenders)
     }
 
     @Test
@@ -185,6 +276,8 @@ class TrayControllerTest {
             scope = kotlinx.coroutines.CoroutineScope(Dispatchers.Unconfined),
             sink = sink,
             grouped = false,
+            keyOf = { it.stableId.toString() },
+            shouldRepost = { old, new -> old !== new },
             stateAccessor = null,
             stateInitial = null,
             rateLimitPerSecond = 8,
@@ -220,19 +313,19 @@ class TrayControllerTest {
         assertEquals(1, old.state.subscriptionCount.value)
 
         tray.applyDelta(mutations(listOf(Wrapped(1, fresh)), Mutation.Update(0)))
-        assertEquals("new", sink.states[1])
+        assertEquals("new", sink.states["1"])
         runCurrent()
         assertEquals(0, old.state.subscriptionCount.value)
         assertEquals(1, fresh.state.subscriptionCount.value)
 
         fresh.state.value = "updated"
         advanceTimeBy(130); runCurrent()
-        assertEquals("updated", sink.states[1])
+        assertEquals("updated", sink.states["1"])
         val posts = sink.postCount
         old.state.value = "stale"
         advanceTimeBy(130); runCurrent()
         assertEquals(posts, sink.postCount)
-        assertEquals("updated", sink.states[1])
+        assertEquals("updated", sink.states["1"])
     }
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -250,7 +343,7 @@ class TrayControllerTest {
 
         tray.applyDelta(mutations(listOf(Wrapped(1, Box("a"))), Mutation.Insert(0, 1)))
         assertEquals(1, sink.postCount)
-        assertEquals(0, sink.states[1])
+        assertEquals(0, sink.states["1"])
 
         // Three rapid updates inside one sampling window collapse to a single re-post of the latest.
         state.value = 1
@@ -260,6 +353,6 @@ class TrayControllerTest {
         runCurrent()
 
         assertEquals(2, sink.postCount)
-        assertEquals(3, sink.states[1])
+        assertEquals(3, sink.states["1"])
     }
 }

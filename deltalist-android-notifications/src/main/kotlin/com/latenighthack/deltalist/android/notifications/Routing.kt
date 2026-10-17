@@ -11,7 +11,10 @@ import java.util.concurrent.ConcurrentHashMap
  */
 data class NotificationInteraction(
     val idSpaceTag: String,
-    val stableId: Int,
+    /** The item's tray key: its durable key, or its stable id's digits. */
+    val key: String,
+    /** The item's session-stable id, or null for a keyed notifier. */
+    val stableId: Int?,
     val type: Type,
     val actionKey: String?,
 ) {
@@ -20,6 +23,7 @@ data class NotificationInteraction(
 
 internal const val ACTION_INTERACT = "com.latenighthack.deltalist.android.notifications.INTERACT"
 internal const val EXTRA_TAG = "deltalist.tag"
+internal const val EXTRA_KEY = "deltalist.key"
 internal const val EXTRA_STABLE_ID = "deltalist.stableId"
 internal const val EXTRA_TYPE = "deltalist.type"
 internal const val EXTRA_ACTION_KEY = "deltalist.actionKey"
@@ -61,14 +65,14 @@ open class DeltaNotificationReceiver : BroadcastReceiver() {
         if (intent.action != ACTION_INTERACT) return
 
         val tag = intent.getStringExtra(EXTRA_TAG) ?: return
-        val stableId = intent.getIntExtra(EXTRA_STABLE_ID, Int.MIN_VALUE)
-        if (stableId == Int.MIN_VALUE) return
+        val key = intent.getStringExtra(EXTRA_KEY) ?: return
+        val stableId = intent.getIntExtra(EXTRA_STABLE_ID, Int.MIN_VALUE).takeIf { it != Int.MIN_VALUE }
         val type = intent.getStringExtra(EXTRA_TYPE)
             ?.let { runCatching { NotificationInteraction.Type.valueOf(it) }.getOrNull() }
             ?: return
         val actionKey = intent.getStringExtra(EXTRA_ACTION_KEY)
 
-        val interaction = NotificationInteraction(tag, stableId, type, actionKey)
+        val interaction = NotificationInteraction(tag, key, stableId, type, actionKey)
         if (!NotifierRegistry.dispatch(interaction)) {
             onColdInteraction(context, interaction)
         }
