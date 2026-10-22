@@ -3,18 +3,16 @@ package com.latenighthack.deltalist.react
 import com.latenighthack.deltalist.SectionedDelta
 import com.latenighthack.deltalist.SectionedIds
 import com.latenighthack.deltalist.SectionedStableIds
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.emitAll
 
 @JsModule("react")
 @JsNonModule
 private external object SectionedReactInterop {
     fun useRef(initial: dynamic): dynamic
-    fun useState(initial: dynamic): Array<dynamic>
-    fun useEffect(effect: dynamic, deps: Array<Any?> = definedExternally)
+    fun useSyncExternalStore(subscribe: dynamic, getSnapshot: dynamic): dynamic
 }
 
 /**
@@ -34,7 +32,10 @@ internal class ReactSectionedDeltaListController(
     private var order: List<ReactDeltaListController> = emptyList()
     private var headers: List<Any?> = emptyList()
     private var sectionIds: List<Int> = emptyList()
-    private var revision = 0
+
+    /** Incremented by every [update]. */
+    var revision = 0
+        private set
 
     val handle: dynamic = js("({ sections: [], revision: 0 })")
 
@@ -105,53 +106,69 @@ internal class ReactSectionedDeltaListController(
 }
 
 /**
- * React hook exposing a SectionedDeltaList as one stable object whose `sections` array is
- * replaced, and `revision` incremented, on every emission.
+ * A SectionedDeltaList as a React external store with one stable [handle]:
+ * `{ sections, revision, visibleRange }`. Pass [subscribe] and [getSnapshot] to
+ * `useSyncExternalStore`; the snapshot is the handle's `revision`, and `sections` is replaced on
+ * every change. Collection follows [ReactFlowStore], as in [ReactDeltaListStore].
  *
  * [headerTransform] maps each header when it is published; [itemTransform] is evaluated only
- * when a loaded item is read, as in [useMappedDeltaList]. Mapped objects without a `key`
- * receive the tracked item key.
+ * when a loaded item is read. Mapped objects without a `key` receive the tracked item key.
+ */
+public class ReactSectionedDeltaListStore(
+    sectionedDeltaList: Any,
+    headerTransform: (Any?) -> Any?,
+    itemTransform: (Any?) -> Any?,
+    graceMillis: Int = ReactFlowStore.defaultGraceMillis,
+) {
+    private val controller = ReactSectionedDeltaListController(headerTransform, itemTransform)
+
+    @Suppress("UNCHECKED_CAST")
+    private val store = ReactFlowStore(
+        initial = controller.revision,
+        // Section and item IDs are tracked per collection, as each starts from a full snapshot.
+        source = flow {
+            val ids = SectionedStableIds()
+            emitAll((sectionedDeltaList as Flow<SectionedDelta<Any?, Any?>>).map { delta ->
+                controller.update(delta, ids.apply(delta))
+                controller.revision
+            })
+        },
+        graceMillis = graceMillis,
+        onStop = { controller.dispose() },
+    )
+
+    /** The list. Its identity never changes. */
+    public val handle: Any get() = controller.handle
+    public val subscribe: (listener: () -> Unit) -> () -> Unit get() = store.subscribe
+    public val getSnapshot: () -> Int get() = store.getSnapshot
+
+    /** Replaces the transforms; headers are mapped again now, items on their next read. */
+    public fun updateTransforms(headerTransform: (Any?) -> Any?, itemTransform: (Any?) -> Any?) {
+        controller.updateTransforms(headerTransform, itemTransform)
+    }
+}
+
+/**
+ * React hook exposing a SectionedDeltaList through a [ReactSectionedDeltaListStore] owned by the
+ * component. The handle keeps its identity while [sectionedDeltaList] does.
  */
 public fun useMappedSectionedDeltaList(
     sectionedDeltaList: Any,
     headerTransform: (Any?) -> Any?,
     itemTransform: (Any?) -> Any?,
 ): Any {
-    val controllerRef = SectionedReactInterop.useRef(null)
-    if (controllerRef.current == null) {
-        controllerRef.current = ReactSectionedDeltaListController(headerTransform, itemTransform)
+    val storeRef = SectionedReactInterop.useRef(null)
+    val owned = storeRef.current
+    if (owned == null || owned.source !== sectionedDeltaList) {
+        val created: dynamic = js("({})")
+        created.source = sectionedDeltaList
+        created.store = ReactSectionedDeltaListStore(sectionedDeltaList, headerTransform, itemTransform)
+        storeRef.current = created
     }
-    val controller = controllerRef.current.unsafeCast<ReactSectionedDeltaListController>()
-    controller.updateTransforms(headerTransform, itemTransform)
-
-    val version = SectionedReactInterop.useState(js("({})"))
-    val invalidate = version[1]
-
-    SectionedReactInterop.useEffect({
-        var active = true
-        val scope = CoroutineScope(SupervisorJob())
-        val ids = SectionedStableIds()
-
-        @Suppress("UNCHECKED_CAST")
-        val flow = sectionedDeltaList as Flow<SectionedDelta<Any?, Any?>>
-        scope.launch {
-            flow.collect { delta ->
-                if (active) {
-                    controller.update(delta, ids.apply(delta))
-                    invalidate(js("({})"))
-                }
-            }
-        }
-
-        val cleanup: () -> Unit = {
-            active = false
-            scope.cancel()
-            controller.dispose()
-        }
-        cleanup
-    }, arrayOf(sectionedDeltaList))
-
-    return controller.handle
+    val store = storeRef.current.store.unsafeCast<ReactSectionedDeltaListStore>()
+    store.updateTransforms(headerTransform, itemTransform)
+    SectionedReactInterop.useSyncExternalStore(store.subscribe, store.getSnapshot)
+    return store.handle
 }
 
 /** Identity-mapped form used by applications consuming SectionedDeltaList without BaseKit. */

@@ -209,7 +209,17 @@ belong to the session, which suits notifications the app posts and clears while 
 The `useDeltaList` hook (`deltalist-react`) returns one stable JavaScript `Proxy` that delegates
 array reads to the current DeltaList snapshot. It supports indexed access, `map`, `forEach`, and
 regular iteration without materializing a new array for every delta. Loaded lazy values are acquired
-on access and released when the snapshot changes or the hook unmounts.
+on access and released when the snapshot changes or the collection stops.
+
+The hooks read the list through `useSyncExternalStore` (React 18 or later). Collection starts on
+`Dispatchers.Unconfined` during the first render, so a source that emits on subscription, such as a
+`MutableDeltaList` or a `StateFlow`, has its rows in that render. When the last component
+unmounts, the collection stops after `ReactFlowStore.defaultGraceMillis` (1000 ms) unless another
+mounts first, so StrictMode's remount reuses it. `ReactDeltaListStore` and
+`ReactSectionedDeltaListStore` are the same stores without a hook, for code that keeps one list
+per view model rather than per component; pass their `subscribe` and `getSnapshot` to
+`useSyncExternalStore` and render their `proxy` or `handle`. `ReactFlowStore` does the same for
+any `Flow`.
 
 ```jsx
 import { useDeltaList } from 'your-kmp-module';

@@ -8,18 +8,14 @@ import com.latenighthack.deltalist.SoftList
 import com.latenighthack.deltalist.SoftValue
 import com.latenighthack.deltalist.Stable
 import com.latenighthack.deltalist.acquireOrGet
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.map
 
 @JsModule("react")
 @JsNonModule
 private external object ReactInterop {
     fun useRef(initial: dynamic): dynamic
-    fun useState(initial: dynamic): Array<dynamic>
-    fun useEffect(effect: dynamic, deps: Array<Any?> = definedExternally)
+    fun useSyncExternalStore(subscribe: dynamic, getSnapshot: dynamic): dynamic
 }
 
 /**
@@ -38,7 +34,10 @@ internal class ReactDeltaListController(
     private val mapped = mutableMapOf<Int, Any?>()
     private val objectKeys: dynamic = js("new WeakMap()")
     private var nextObjectKey = 1
-    private var revision = 0
+
+    /** Incremented by every [update]. */
+    var revision = 0
+        private set
 
     val proxy: dynamic = createProxy()
 
@@ -229,49 +228,65 @@ internal class ReactDeltaListController(
 }
 
 /**
- * React hook exposing a DeltaList as one stable, array-compatible delegated object.
+ * A DeltaList as a React external store with one stable, array-compatible delegated [proxy].
+ * Pass [subscribe] and [getSnapshot] to `useSyncExternalStore`; the snapshot is the proxy's
+ * `revision`. Collection follows [ReactFlowStore]: a source that emits on subscription has its rows
+ * in the first snapshot, one collection serves every subscriber, and leases are released when the
+ * collection stops.
  *
  * [transform] is evaluated only when a loaded element is read. It is intended for generated
  * platform wrappers; semantic filtering, mapping, sorting, and grouping still belong upstream.
+ */
+public class ReactDeltaListStore(
+    deltaList: Any,
+    transform: (Any?) -> Any?,
+    graceMillis: Int = ReactFlowStore.defaultGraceMillis,
+) {
+    private val controller = ReactDeltaListController(transform)
+
+    @Suppress("UNCHECKED_CAST")
+    private val store = ReactFlowStore(
+        initial = controller.revision,
+        source = (deltaList as Flow<Delta<Any?>>).map { delta ->
+            controller.update(delta.items)
+            controller.revision
+        },
+        graceMillis = graceMillis,
+        onStop = { controller.dispose() },
+    )
+
+    /** The list. Its identity never changes; it reads the latest snapshot. */
+    public val proxy: Any get() = controller.proxy
+    public val subscribe: (listener: () -> Unit) -> () -> Unit get() = store.subscribe
+    public val getSnapshot: () -> Int get() = store.getSnapshot
+
+    /** Replaces the element transform; elements are mapped again on their next read. */
+    public fun updateTransform(transform: (Any?) -> Any?) {
+        controller.updateTransform(transform)
+    }
+}
+
+/**
+ * React hook exposing a DeltaList as one delegated object through a [ReactDeltaListStore] owned by
+ * the component. The object keeps its identity while [deltaList] does. When the source emits on
+ * subscription, the first render has its rows.
  */
 public fun useMappedDeltaList(
     deltaList: Any,
     transform: (Any?) -> Any?,
 ): Any {
-    val controllerRef = ReactInterop.useRef(null)
-    if (controllerRef.current == null) {
-        controllerRef.current = ReactDeltaListController(transform)
+    val storeRef = ReactInterop.useRef(null)
+    val owned = storeRef.current
+    if (owned == null || owned.source !== deltaList) {
+        val created: dynamic = js("({})")
+        created.source = deltaList
+        created.store = ReactDeltaListStore(deltaList, transform)
+        storeRef.current = created
     }
-    val controller = controllerRef.current.unsafeCast<ReactDeltaListController>()
-    controller.updateTransform(transform)
-
-    val version = ReactInterop.useState(js("({})"))
-    val invalidate = version[1]
-
-    ReactInterop.useEffect({
-        var active = true
-        val scope = CoroutineScope(SupervisorJob())
-
-        @Suppress("UNCHECKED_CAST")
-        val flow = deltaList as Flow<Delta<Any?>>
-        scope.launch {
-            flow.collect { delta ->
-                if (active) {
-                    controller.update(delta.items)
-                    invalidate(js("({})"))
-                }
-            }
-        }
-
-        val cleanup: () -> Unit = {
-            active = false
-            scope.cancel()
-            controller.dispose()
-        }
-        cleanup
-    }, arrayOf(deltaList))
-
-    return controller.proxy
+    val store = storeRef.current.store.unsafeCast<ReactDeltaListStore>()
+    store.updateTransform(transform)
+    ReactInterop.useSyncExternalStore(store.subscribe, store.getSnapshot)
+    return store.proxy
 }
 
 /** Identity-mapped form used by applications consuming DeltaList without BaseKit. */
