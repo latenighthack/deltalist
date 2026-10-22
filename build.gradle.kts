@@ -18,3 +18,12 @@ allprojects {
     // Skip javadoc generation and publish an empty javadoc jar; Central only requires the artifact.
     tasks.matching { it.name == "javaDocReleaseGeneration" }.configureEach { enabled = false }
 }
+
+// npm resolves the newest webpack 5 for loader and plugin peer dependencies and hoists it to the
+// root, beside the version the Kotlin plugin pins for each test package. karma-webpack then runs
+// with two webpacks and fails ("The 'compilation' argument must be an instance of Compilation").
+// Pin every webpack to the Kotlin plugin's version; kotlin-js-store records the resolution.
+plugins.withType<org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsRootPlugin> {
+    val webpack = the<org.jetbrains.kotlin.gradle.targets.js.nodejs.NodeJsRootExtension>().versions.webpack.version
+    the<org.jetbrains.kotlin.gradle.targets.js.npm.NpmExtension>().override("webpack", webpack)
+}
