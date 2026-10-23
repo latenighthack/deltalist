@@ -1,9 +1,12 @@
 package com.latenighthack.deltalist
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.time.TimeSource
 
 /**
  * Direction of a pagination fetch operation.
@@ -35,6 +38,10 @@ enum class LoadDirection {
  * @param fetch The suspend function that fetches a page. Receives the load direction
  *        and the token for that direction. The closure can use the direction to manage
  *        its own loading state (e.g., emit to a separate loading flow).
+ *
+ * Paging events are reported to every [PagingObservation] in the coroutine context of an active
+ * collector of the returned list. Use the overload that takes an `observer` to also report them
+ * to a fixed observer.
  */
 fun <T, U> paginatedDeltaList(
     scope: CoroutineScope,
@@ -42,17 +49,35 @@ fun <T, U> paginatedDeltaList(
     startToken: U,
     initialEstimatedSize: Int? = null,
     fetch: suspend (direction: LoadDirection, token: U) -> Page<T, U>
-): DeltaList<T> = PaginatedDeltaListImpl(scope, fetchWindowSize, startToken, initialEstimatedSize, fetch)
+): DeltaList<T> = PaginatedDeltaListImpl(scope, fetchWindowSize, startToken, initialEstimatedSize, null, fetch)
+
+/**
+ * Same as the [paginatedDeltaList] overload without `observer`, and additionally reports every
+ * [PagingEvent] of the returned list to [observer] (when non-null), for the list's whole lifetime.
+ * Collector-context [PagingObservation]s still receive events as well.
+ */
+fun <T, U> paginatedDeltaList(
+    scope: CoroutineScope,
+    fetchWindowSize: Int = 1,
+    startToken: U,
+    initialEstimatedSize: Int? = null,
+    observer: PagingObserver?,
+    fetch: suspend (direction: LoadDirection, token: U) -> Page<T, U>
+): DeltaList<T> = PaginatedDeltaListImpl(scope, fetchWindowSize, startToken, initialEstimatedSize, observer, fetch)
 
 internal class PaginatedDeltaListImpl<T, U>(
     private val scope: CoroutineScope,
     private val fetchWindowSize: Int,
     private val startToken: U,
     initialEstimatedSize: Int?,
+    observer: PagingObserver?,
     private val fetch: suspend (direction: LoadDirection, token: U) -> Page<T, U>
 ) : DeltaList<T> {
 
     private val mutex = Mutex()
+
+    // Explicit observer plus the observers of active collections. Reading it is one atomic load.
+    private val observers = PagingObserverRegistry(observer)
 
     // Internal state
     private val _items = mutableListOf<T>()
@@ -75,6 +100,10 @@ internal class PaginatedDeltaListImpl<T, U>(
     // drive a fetch (decision A: side effects honored only on the current snapshot).
     private var generation = 0
 
+    // Row count of the placeholder snapshot published before the first page loads (no leading
+    // rows, since there is no before-token yet). Reported as the INITIAL request range.
+    private val initialPlaceholderCount = currentTrailing(0)
+
     private val state = DeltaState(Delta(createWrapper(), Change.Reload)) {
         Delta(it.items, Change.Reload)
     }
@@ -83,14 +112,26 @@ internal class PaginatedDeltaListImpl<T, U>(
         generation += 1
         val myGen = generation
         val leading = currentLeading()
+        val trailing = currentTrailing(leading)
+        val trailingStart = leading + _items.size
         return PaginatedListWrapper(
             items = _items.toList(),
             leading = leading,
-            trailing = currentTrailing(leading),
+            trailing = trailing,
             hasMoreBefore = _beforeToken != null,
             hasMoreAfter = _afterToken != null || !_initialLoadDone,
-            onAccessNearStart = { triggerBeforeFetch(myGen) },
-            onAccessNearEnd = { triggerAfterFetch(myGen) }
+            onAccessNearStart = {
+                val obs = observers.snapshot()
+                if (obs.isNotEmpty()) obs.deliver(PagingEvent.Requested(LoadDirection.BEFORE, 0 until leading))
+                triggerBeforeFetch(myGen, obs)
+            },
+            onAccessNearEnd = {
+                val obs = observers.snapshot()
+                if (obs.isNotEmpty()) {
+                    obs.deliver(PagingEvent.Requested(LoadDirection.AFTER, trailingStart until trailingStart + trailing))
+                }
+                triggerAfterFetch(myGen, obs)
+            }
         )
     }
 
@@ -119,7 +160,7 @@ internal class PaginatedDeltaListImpl<T, U>(
         else -> 0                                 // bidirectional from the middle: inflate the trailing side
     }
 
-    private fun triggerInitialFetch() {
+    private fun triggerInitialFetch(obs: List<PagingObserver>) {
         scope.launch {
             mutex.withLock {
                 // Double-check under lock for thread safety
@@ -127,6 +168,7 @@ internal class PaginatedDeltaListImpl<T, U>(
                 _isLoadingAfter = true
             }
 
+            val trace = if (obs.isEmpty()) null else FetchTrace(obs, LoadDirection.INITIAL)
             try {
                 val page = fetch(LoadDirection.INITIAL, startToken)
 
@@ -143,16 +185,21 @@ internal class PaginatedDeltaListImpl<T, U>(
 
                     emitChange(page.items.size, isAppend = true, isInitial = true)
                 }
+                trace?.completed(page.items.size)
             } catch (e: Exception) {
+                trace?.ended(e)
                 mutex.withLock {
                     _isLoadingAfter = false
                 }
+                throw e
+            } catch (e: Throwable) {
+                trace?.ended(e)
                 throw e
             }
         }
     }
 
-    private fun triggerBeforeFetch(requestedGeneration: Int) {
+    private fun triggerBeforeFetch(requestedGeneration: Int, obs: List<PagingObserver>) {
         scope.launch {
             val token = mutex.withLock {
                 // Validate the request and capture its token in the same critical section.
@@ -163,6 +210,7 @@ internal class PaginatedDeltaListImpl<T, U>(
                 currentToken
             }
 
+            val trace = if (obs.isEmpty()) null else FetchTrace(obs, LoadDirection.BEFORE)
             try {
                 val page = fetch(LoadDirection.BEFORE, token)
 
@@ -183,16 +231,21 @@ internal class PaginatedDeltaListImpl<T, U>(
 
                     emitChange(insertCount, isAppend = false, isInitial = false)
                 }
+                trace?.completed(page.items.size)
             } catch (e: Exception) {
+                trace?.ended(e)
                 mutex.withLock {
                     _isLoadingBefore = false
                 }
+                throw e
+            } catch (e: Throwable) {
+                trace?.ended(e)
                 throw e
             }
         }
     }
 
-    private fun triggerAfterFetch(requestedGeneration: Int) {
+    private fun triggerAfterFetch(requestedGeneration: Int, obs: List<PagingObserver>) {
         scope.launch {
             val token = mutex.withLock {
                 if (requestedGeneration != generation || _isLoadingAfter) return@launch
@@ -201,6 +254,7 @@ internal class PaginatedDeltaListImpl<T, U>(
                 currentToken
             }
 
+            val trace = if (obs.isEmpty()) null else FetchTrace(obs, LoadDirection.AFTER)
             try {
                 val page = fetch(LoadDirection.AFTER, token)
 
@@ -218,10 +272,15 @@ internal class PaginatedDeltaListImpl<T, U>(
 
                     emitChange(insertCount, isAppend = true, isInitial = false, previousRealSize = previousSize)
                 }
+                trace?.completed(page.items.size)
             } catch (e: Exception) {
+                trace?.ended(e)
                 mutex.withLock {
                     _isLoadingAfter = false
                 }
+                throw e
+            } catch (e: Throwable) {
+                trace?.ended(e)
                 throw e
             }
         }
@@ -324,9 +383,51 @@ internal class PaginatedDeltaListImpl<T, U>(
     }
 
     override suspend fun collect(collector: kotlinx.coroutines.flow.FlowCollector<Delta<T>>) {
+        val observation = currentCoroutineContext()[PagingObservation]
+        if (observation == null) {
+            startCollection(collector)
+            return
+        }
+        // This collection's observer receives events only while the collection is active.
+        observers.add(observation.observer)
+        try {
+            startCollection(collector)
+        } finally {
+            observers.remove(observation.observer)
+        }
+    }
+
+    private suspend fun startCollection(collector: kotlinx.coroutines.flow.FlowCollector<Delta<T>>) {
+        val obs = observers.snapshot()
+        if (obs.isNotEmpty()) obs.deliver(PagingEvent.Requested(LoadDirection.INITIAL, 0 until initialPlaceholderCount))
         // Trigger initial fetch when collection starts
-        triggerInitialFetch()
+        triggerInitialFetch(obs)
         state.collect(collector)
+    }
+}
+
+/** Reports one observed fetch: [PagingEvent.Started] on creation, then exactly one terminal event. */
+private class FetchTrace(
+    private val observers: List<PagingObserver>,
+    private val direction: LoadDirection
+) {
+    private val fetchId = newPagingFetchId()
+    private val start = TimeSource.Monotonic.markNow()
+
+    init {
+        observers.deliver(PagingEvent.Started(fetchId, direction))
+    }
+
+    fun completed(itemCount: Int) {
+        observers.deliver(PagingEvent.Completed(fetchId, direction, itemCount, start.elapsedNow()))
+    }
+
+    fun ended(error: Throwable) {
+        val duration = start.elapsedNow()
+        observers.deliver(
+            if (error is CancellationException) PagingEvent.Cancelled(fetchId, direction, duration)
+            else PagingEvent.Failed(fetchId, direction, error, duration)
+        )
     }
 }
 
