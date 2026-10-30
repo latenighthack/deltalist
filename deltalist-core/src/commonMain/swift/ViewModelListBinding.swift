@@ -192,9 +192,14 @@ public struct DeltaForEach<Raw: AnyObject, Element, RowContent: View>: View {
 // A lifecycle modifier on a ForEach is installed on its produced rows. An empty ForEach
 // therefore cannot start its own collection. State ownership starts collection even when
 // there are no rows, without contributing a sibling or wrapper to List/Form/lazy containers.
+//
+// Not private: DeltaForEach, which is public, stores one, and an optimized client lays that struct
+// out directly, so it links against this class's metadata. A private type's symbols are local to
+// this file, so Release builds of apps failed with "Undefined symbols ... DeltaForEachCollector".
 @available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
 @MainActor
-private final class DeltaForEachCollector<Raw: AnyObject, Element>: ObservableObject {
+@usableFromInline
+internal final class DeltaForEachCollector<Raw: AnyObject, Element>: ObservableObject {
     let list = DeltaList<Raw>(materializesItems: false)
     private var binding: ViewModelListBinding<Raw, Element>?
     private var task: Task<Void, Never>?
