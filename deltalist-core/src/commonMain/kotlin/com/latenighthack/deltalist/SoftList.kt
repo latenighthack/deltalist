@@ -242,10 +242,9 @@ fun <T> Delta<T>.requestLoadAt(index: Int) {
  * Checks if an item at the given index is loaded.
  * Returns true if the item is present, false if not loaded or out of bounds.
  * This is safe to call from iOS - pass the Delta directly to avoid bridging issues.
+ * It never maps a lazily mapped item: native lists ask this of every slot on every delta.
  */
-fun <T> Delta<T>.isLoadedAt(index: Int): Boolean {
-    return items.softGetOrNull(index) is SoftValue.Present
-}
+fun <T> Delta<T>.isLoadedAt(index: Int): Boolean = items.isLoadedWithoutMapping(index)
 
 /**
  * Gets an item at the given index if it's loaded, or null if not loaded/out of bounds.

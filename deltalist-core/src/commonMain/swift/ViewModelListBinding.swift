@@ -225,7 +225,7 @@ private struct DeltaForEachRows<Raw: AnyObject, Element, RowContent: View>: View
 
     var body: some View {
         ForEach(loadedSlots(list: list)) { slot in
-            DeltaBoundRow(binding: binding, list: list, index: slot.index, rowContent: rowContent)
+            DeltaBoundRow(binding: binding, list: list, id: slot.id, index: slot.index, rowContent: rowContent)
         }
     }
 }
@@ -257,44 +257,68 @@ private func loadedSlots<Raw: AnyObject>(
 
 @available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
 @MainActor
+private struct BoundRowInput<Raw: AnyObject, Element>: Equatable {
+    let binding: ViewModelListBinding<Raw, Element>
+    let list: DeltaList<Raw>
+    /// The row's stable id, from the slot it was created for.
+    let id: Int
+    let index: Int
+    let revision: UInt
+
+    /// Whether the slot at `index` is still this row's. A removed row can outlive its slot while it
+    /// transitions out; it must not take over whichever item now sits at its old index. Bounds come
+    /// from the current delta, not `totalSize`: a body can run while the store is mid-publish.
+    var isCurrent: Bool { list.isLoaded(at: index) && list.stableId(at: index) == id }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.binding === rhs.binding && lhs.list === rhs.list && lhs.id == rhs.id &&
+            lhs.index == rhs.index && lhs.revision == rhs.revision
+    }
+}
+
+/// One materialised row's lease. It is acquired when SwiftUI first creates the row and held until
+/// SwiftUI destroys it, so hiding the row (another tab, a pushed screen) neither evicts nor rebuilds
+/// its child. Rows a lazy container never creates are never acquired.
+@available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
+@MainActor
 private final class BoundRowState<Raw: AnyObject, Element>: ObservableObject {
     struct Value {
         let element: Element
         let lease: DeltaItemLease<Raw>
         let binding: ViewModelListBinding<Raw, Element>
     }
-    @Published var value: Value?
+    private var input: BoundRowInput<Raw, Element>
+    private var value: Value?
 
-    func update(binding: ViewModelListBinding<Raw, Element>, list: DeltaList<Raw>, index: Int) {
-        guard let next = list.acquireItem(at: index) else { clear(); return }
+    init(_ input: BoundRowInput<Raw, Element>) {
+        self.input = input
+        value = Self.acquire(input, reusing: nil)
+    }
+
+    /// The row's value for its current input, re-acquired when a delta, binding or store changes.
+    /// Nothing here is published: the row's body asks for it, so the first frame and every later
+    /// one draws the acquired element without invalidating the view again.
+    func value(for next: BoundRowInput<Raw, Element>) -> Value? {
+        guard next != input, next.isCurrent else { return value }
+        input = next
         let previous = value
+        value = Self.acquire(next, reusing: previous)
+        previous?.lease.release()
+        return value
+    }
+
+    private static func acquire(_ input: BoundRowInput<Raw, Element>, reusing previous: Value?) -> Value? {
+        guard let lease = input.list.acquireItem(at: input.index) else { return nil }
         let element: Element
-        if let previous, previous.lease.item === next.item, previous.binding === binding {
+        if let previous, previous.lease.item === lease.item, previous.binding === input.binding {
             element = previous.element
         } else {
-            element = binding.makeElement(for: next.item)
+            element = input.binding.makeElement(for: lease.item)
         }
-        value = Value(element: element, lease: next, binding: binding)
-        previous?.lease.release()
+        return Value(element: element, lease: lease, binding: input.binding)
     }
-    func clear() {
-        let previous = value
-        value = nil
-        previous?.lease.release()
-    }
-}
 
-@available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
-@MainActor
-private struct BoundRowInput<Raw: AnyObject, Element>: Equatable {
-    let binding: ViewModelListBinding<Raw, Element>
-    let list: DeltaList<Raw>
-    let index: Int
-    let revision: UInt
-
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.binding === rhs.binding && lhs.list === rhs.list && lhs.index == rhs.index && lhs.revision == rhs.revision
-    }
+    deinit { value?.lease.release() }
 }
 
 @available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
@@ -302,32 +326,43 @@ private struct BoundRowInput<Raw: AnyObject, Element>: Equatable {
 private struct DeltaBoundRow<Raw: AnyObject, Element, RowContent: View>: View {
     let binding: ViewModelListBinding<Raw, Element>
     @ObservedObject var list: DeltaList<Raw>
+    let id: Int
     let index: Int
     let rowContent: (Element) -> RowContent
-    @StateObject private var state = BoundRowState<Raw, Element>()
+    @StateObject private var state: BoundRowState<Raw, Element>
+
+    init(
+        binding: ViewModelListBinding<Raw, Element>,
+        list: DeltaList<Raw>,
+        id: Int,
+        index: Int,
+        rowContent: @escaping (Element) -> RowContent
+    ) {
+        self.binding = binding
+        self.list = list
+        self.id = id
+        self.index = index
+        self.rowContent = rowContent
+        // Evaluated once, when SwiftUI first creates this row, never for a row it doesn't create.
+        _state = StateObject(wrappedValue: BoundRowState(
+            BoundRowInput(binding: binding, list: list, id: id, index: index, revision: list.revision)))
+    }
 
     var body: some View {
-        let input = BoundRowInput(binding: binding, list: list, index: index, revision: list.revision)
+        let input = BoundRowInput(binding: binding, list: list, id: id, index: index, revision: list.revision)
         ZStack(alignment: .leading) {
-            if let value = state.value {
+            if let value = state.value(for: input) {
+                // Observation follows visibility; the lease and the element outlive it.
                 rowContent(value.element)
                     .task(id: RowObservationIdentity(binding: ObjectIdentifier(value.binding), raw: ObjectIdentifier(value.lease.item))) {
                         await value.binding.observe(value.element)
                     }
-            } else if let raw = list.loadedItem(at: index) {
-                // A real row mounts the lifecycle before the first acquisition.
-                rowContent(binding.makeElement(for: raw))
             }
         }
-        .onAppear { state.update(binding: binding, list: list, index: index) }
-        .onChange(of: input) { next in
-            state.update(binding: next.binding, list: next.list, index: next.index)
-        }
-        .onDisappear { state.clear() }
     }
 }
 
-/// A paginated SwiftUI list. Only mounted rows retain acquired children and observe their state.
+/// A paginated SwiftUI list. Only rows SwiftUI creates acquire children, and only visible rows observe their state.
 @available(iOS 15.0, macOS 12.0, tvOS 15.0, watchOS 8.0, *)
 @MainActor
 public struct DeltaLazyListView<Raw: AnyObject, Element, RowContent: View, LoadingContent: View>: View {
@@ -349,7 +384,7 @@ public struct DeltaLazyListView<Raw: AnyObject, Element, RowContent: View, Loadi
     public var body: some View {
         List(loadedSlots(list: list, includeUnloaded: true)) { slot in
             if slot.loaded {
-                DeltaBoundRow(binding: binding, list: list, index: slot.index, rowContent: rowContent)
+                DeltaBoundRow(binding: binding, list: list, id: slot.id, index: slot.index, rowContent: rowContent)
             } else {
                 loadingContent(slot.index)
                     .onAppear { list.triggerLoad(at: slot.index) }

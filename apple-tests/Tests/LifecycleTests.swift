@@ -68,6 +68,34 @@ private struct OwnedRows: View {
 }
 
 @MainActor
+private final class Visibility: ObservableObject {
+    @Published var tab = 0
+    @Published var shown = true
+}
+
+/// Rows on the first tab of a `TabView`, so switching tabs hides them without destroying them.
+@MainActor
+private struct TabbedRows<Rows: View>: View {
+    @ObservedObject var visibility: Visibility
+    let rows: Rows
+    var body: some View {
+        TabView(selection: $visibility.tab) {
+            rows.tag(0).tabItem { Text("Rows") }
+            Text("Other").tag(1).tabItem { Text("Other") }
+        }
+    }
+}
+
+@MainActor
+private struct RemovableRows<Rows: View>: View {
+    @ObservedObject var visibility: Visibility
+    let rows: Rows
+    var body: some View {
+        VStack { if visibility.shown { rows } }
+    }
+}
+
+@MainActor
 private final class MountedView {
     #if canImport(UIKit)
     let window: UIWindow
@@ -325,7 +353,7 @@ final class LifecycleTests: XCTestCase {
         let secondTask = Task { await secondBinding.collect(into: secondStore) }
         await eventually("both stores loaded") { firstStore.totalSize == 1 && secondStore.totalSize == 1 }
         let configuration = RowConfiguration(binding: firstBinding, store: firstStore)
-        let host = MountedView(AnyView(ConfiguredRows(configuration: configuration)))
+        var host: MountedView? = MountedView(AnyView(ConfiguredRows(configuration: configuration)))
         await eventually("first observer mounted") { firstObservations.active.count == 1 && first.acquiredCount == 1 }
         let rawIdentity = firstObservations.active["A"]
         configuration.binding = secondBinding
@@ -337,7 +365,9 @@ final class LifecycleTests: XCTestCase {
             first.acquiredCount == 0 && second.acquiredCount == 1 &&
                 secondObservations.active["A"] != nil && secondObservations.active["A"] != rawIdentity
         }
-        host.close()
+        // Rows hold their leases until SwiftUI destroys them, not when their window closes.
+        host?.close()
+        host = nil
         await eventually("replacement row released") { second.acquiredCount == 0 && secondObservations.active.isEmpty }
         firstTask.cancel(); secondTask.cancel()
         await firstTask.value; await secondTask.value
@@ -432,6 +462,119 @@ final class LifecycleTests: XCTestCase {
         dataSource.collectionView(collection, didEndDisplaying: cell, forRepresentedObjectAt: path)
         #endif
         XCTAssertEqual(probe.acquiredCount, 0, "DSL visibility teardown must run the base lease cleanup")
+    }
+
+    private func container<Rows: View>(_ kind: Int, _ rows: Rows) -> AnyView {
+        switch kind {
+        case 0: return AnyView(VStack { rows })
+        case 1: return AnyView(List { rows })
+        default: return AnyView(ScrollView { LazyVStack { rows } })
+        }
+    }
+
+    func testHidingRowsKeepsTheirChildren() async {
+        for kind in 0..<3 {
+            let probe = BindingLifecycleProbe()
+            let observations = Observations()
+            let binding = binding(probe, observations)
+            let visibility = Visibility()
+            let rows = container(kind, DeltaListCore.DeltaForEach(binding) { Text($0.key) })
+            var host: MountedView? = MountedView(AnyView(TabbedRows(visibility: visibility, rows: rows)))
+            await eventually("collector started (container \(kind))") { probe.activeCollectors == 1 }
+            probe.reload(keys: ["A", "B", "C"])
+            await eventually("rows observed (container \(kind))") {
+                observations.active.count == 3 && probe.acquiredCount == 3
+            }
+            XCTAssertEqual(probe.builds, 3, "each row is built once (container \(kind))")
+            for cycle in 0..<2 {
+                visibility.tab = 1
+                await eventually("hidden rows stop observing (container \(kind), cycle \(cycle))") {
+                    observations.active.isEmpty
+                }
+                XCTAssertEqual(probe.acquiredCount, 3, "hidden rows keep their leases (container \(kind))")
+                XCTAssertEqual(probe.builds, 3, "hiding builds nothing (container \(kind), cycle \(cycle))")
+                visibility.tab = 0
+                await eventually("shown rows observe again (container \(kind), cycle \(cycle))") {
+                    observations.active.count == 3
+                }
+                XCTAssertEqual(probe.acquiredCount, 3)
+                XCTAssertEqual(probe.builds, 3, "showing builds nothing (container \(kind), cycle \(cycle))")
+            }
+            host?.close()
+            host = nil
+            await eventually("tabbed rows released (container \(kind))") {
+                probe.activeCollectors == 0 && probe.acquiredCount == 0 && observations.active.isEmpty
+            }
+        }
+    }
+
+    func testDeltasBuildOnlyTheirOwnRows() async {
+        for kind in 0..<3 {
+            let probe = BindingLifecycleProbe()
+            let observations = Observations()
+            let binding = binding(probe, observations)
+            var host: MountedView? = MountedView(container(kind, DeltaListCore.DeltaForEach(binding) { Text($0.key) }))
+            await eventually("collector started (container \(kind))") { probe.activeCollectors == 1 }
+            for (count, key) in ["A", "B", "C"].enumerated() {
+                probe.append(key: key)
+                await eventually("\(key) observed (container \(kind))") {
+                    observations.active.count == count + 1 && Int(probe.acquiredCount) == count + 1
+                }
+                XCTAssertEqual(Int(probe.builds), count + 1, "an insert builds only the new row (container \(kind))")
+            }
+            let identity = observations.active["A"]
+            // Wait for each delta: the source reloads after a missed one, and a reload rebuilds.
+            var emitted = probe.emissions
+            probe.move(from: 0, to: 2)
+            await eventually("move delivered (container \(kind))") { probe.emissions > emitted }
+            await eventually("move keeps observation (container \(kind))") { observations.active["A"] == identity }
+            XCTAssertEqual(probe.builds, 3, "a move builds nothing (container \(kind))")
+            emitted = probe.emissions
+            probe.remove(at: 0)
+            await eventually("remove delivered (container \(kind))") { probe.emissions > emitted }
+            await eventually("removed row stops (container \(kind))") {
+                observations.active.keys.sorted() == ["A", "C"] && probe.acquiredCount == 2
+            }
+            XCTAssertEqual(probe.builds, 3, "a remove builds nothing (container \(kind))")
+            probe.reload(keys: ["A", "C"])
+            await eventually("reloaded rows observed (container \(kind))") {
+                observations.active.keys.sorted() == ["A", "C"] && observations.active["A"] != identity &&
+                    probe.acquiredCount == 2
+            }
+            XCTAssertEqual(probe.builds, 5, "a reload builds each row once (container \(kind))")
+            host?.close()
+            host = nil
+            await eventually("rows released (container \(kind))") {
+                probe.activeCollectors == 0 && probe.acquiredCount == 0
+            }
+        }
+    }
+
+    func testDestroyedRowsReleaseWhileCollectionContinues() async {
+        let probe = BindingLifecycleProbe()
+        let observations = Observations()
+        let binding = binding(probe, observations)
+        let store = DeltaListCore.DeltaList<Row>()
+        let task = Task { await binding.collect(into: store) }
+        let visibility = Visibility()
+        let rows = DeltaListCore.DeltaForEach(binding, observing: store) { Text($0.key) }
+        var host: MountedView? = MountedView(AnyView(RemovableRows(visibility: visibility, rows: rows)))
+        probe.reload(keys: ["A", "B"])
+        await eventually("rows observed") { observations.active.count == 2 && probe.acquiredCount == 2 }
+        // A public DeltaList materializes its items, which builds rows of its own; count from here.
+        let built = probe.builds
+        visibility.shown = false
+        await eventually("destroyed rows release") { observations.active.isEmpty && probe.acquiredCount == 0 }
+        XCTAssertEqual(probe.activeCollectors, 1, "collection outlives the rows")
+        XCTAssertEqual(probe.builds, built, "destroying rows builds nothing")
+        visibility.shown = true
+        await eventually("recreated rows acquire") { observations.active.count == 2 && probe.acquiredCount == 2 }
+        XCTAssertEqual(probe.builds, built + 2, "recreated rows are built once each")
+        host?.close()
+        host = nil
+        await eventually("rows released") { probe.acquiredCount == 0 }
+        task.cancel()
+        await task.value
     }
 
 }

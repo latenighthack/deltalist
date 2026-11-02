@@ -3,6 +3,7 @@ package com.latenighthack.deltalist.operators
 import com.latenighthack.deltalist.Delta
 import com.latenighthack.deltalist.LazyList
 import com.latenighthack.deltalist.acquireLoadedItems
+import com.latenighthack.deltalist.isLoadedAt
 import com.latenighthack.deltalist.loadedItems
 import com.latenighthack.deltalist.mutableDeltaListOf
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -13,8 +14,10 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotSame
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 class AcquireLoadedItemsTest {
     private class Row(val label: String)
@@ -69,6 +72,22 @@ class AcquireLoadedItemsTest {
         runCurrent()
 
         assertNotSame(deltas.last().loadedItems()[0], deltas.last().loadedItems()[0])
+        job.cancel()
+    }
+
+    @Test
+    fun loadStateChecksBuildNothing() = runTest {
+        val source = mutableDeltaListOf(listOf("a", "b"))
+        val deltas = mutableListOf<Delta<Row>>()
+        var built = 0
+        val job = launch { source.lazyMap { built++; Row(it) }.collect { deltas.add(it) } }
+        runCurrent()
+
+        assertTrue(deltas.last().isLoadedAt(0))
+        assertTrue(deltas.last().isLoadedAt(1))
+        assertFalse(deltas.last().isLoadedAt(2))
+        assertFalse(deltas.last().isLoadedAt(-1))
+        assertEquals(0, built)
         job.cancel()
     }
 }

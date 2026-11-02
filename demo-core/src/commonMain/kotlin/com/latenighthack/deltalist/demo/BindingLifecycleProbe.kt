@@ -12,6 +12,12 @@ class BindingLifecycleProbe {
     private var latest: Delta<BindingProbeRow>? = null
     var activeCollectors: Int = 0
         private set
+    /** How many times the row mapper has run: each run builds a new row. */
+    var builds: Int = 0
+        private set
+    /** Deltas delivered to the collector. A source that misses one reloads, so tests wait on this. */
+    var emissions: Int = 0
+        private set
     val acquiredCount: Int get() {
         val list = latest?.items as? LazyList<*> ?: return 0
         return (0 until list.size).count { list.isAcquired(it) }
@@ -19,14 +25,16 @@ class BindingLifecycleProbe {
     val items: DeltaList<BindingProbeRow> = flow {
         activeCollectors++
         try {
-            source.lazyMap { BindingProbeRow(it) }.collect {
+            source.lazyMap { builds++; BindingProbeRow(it) }.collect {
                 latest = it
+                emissions++
                 emit(it)
             }
         } finally { activeCollectors-- }
     }
     fun append(key: String) = source.append(key)
     fun move(from: Int, to: Int) = source.move(from, to)
+    fun remove(at: Int) = source.removeAt(at)
     fun clear() = source.clear()
     fun reload(keys: List<String>) = source.reload(keys)
 }
