@@ -25,18 +25,15 @@ fun <T> concatSections(flows: List<DeltaList<T>>): DeltaList<T> {
                     concatenatedRoute(sources, it)
                 }
                 val old = previous
-                val needsReload = old == null || emissions.withIndex().any { (index, emission) ->
-                    emission.sequence != old[index].sequence && !emission.isConsecutiveMutationOf(old[index])
-                }
-                val change = if (needsReload) {
+                val change = if (old == null) {
                     Change.Reload
                 } else {
+                    // A flow that reloaded, or whose emissions combine skipped, replaces only its
+                    // own range, so the other flows keep their rows.
                     val operations = mutableListOf<Mutation>()
                     var offset = 0
                     for ((index, emission) in emissions.withIndex()) {
-                        if (emission.sequence != old!![index].sequence) {
-                            operations += (emission.delta.change as Change.Mutations).operations.map { it.offsetBy(offset) }
-                        }
+                        operations += emission.changeWithin(old[index], offset)
                         offset += emission.delta.items.size
                     }
                     if (operations.isEmpty()) Change.Reload else Change.Mutations(operations)

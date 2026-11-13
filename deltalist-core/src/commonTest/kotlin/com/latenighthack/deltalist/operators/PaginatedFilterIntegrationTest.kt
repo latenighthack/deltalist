@@ -300,9 +300,10 @@ class PaginatedFilterIntegrationTest {
         delay(100)
         job.cancel()
 
-        // Should have emitted reload with new estimated size
+        // Should have re-filtered the loaded rows in place, with the new estimated size
         val lastDelta = results.last()
-        assertIs<Change.Reload>(lastDelta.change)
+        assertIs<Change.Mutations>(lastDelta.change)
+        results.assertSoftOracle()
         assertEquals(20, lastDelta.items.size)
 
         // Loaded items should be 5, 10, 15, 20

@@ -256,6 +256,17 @@ const items = useDeltaList(viewModel.items)
 unloaded positions. `revision` changes after every delta for virtualizers that cache rendered rows;
 the proxy itself intentionally remains referentially stable.
 
+A list rendered in place renders its unloaded positions as placeholders, as the iOS and Android
+bindings do. Each placeholder's slot is requested while the placeholder is in view, and again after
+each delta that leaves the slot unloaded:
+
+```jsx
+{items.mapSlots(
+    (item) => <ItemRow key={item.key} item={item} />,
+    (index, ref) => <Spinner key={`slot-${index}`} ref={ref} />,
+)}
+```
+
 ### Delivery and ownership contracts
 
 Mutable flat/sectioned holders and paginated sources deliver a `Reload` to each new

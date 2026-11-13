@@ -250,8 +250,11 @@ private sealed class FilterEvent<out T> {
 
 /**
  * Filters items dynamically based on a predicate that can change over time.
- * When [predicateFlow] emits a new predicate, all current items are re-filtered
- * and a [Change.Reload] is emitted.
+ * When [predicateFlow] emits a new predicate, all current items are re-filtered and the
+ * rows that left or joined the filter are emitted as [Change.Mutations], so the rows that
+ * still match keep their identity; nothing is emitted when no row changes. The first
+ * predicate, and any change while a leading "load earlier" placeholder is involved, emit
+ * a [Change.Reload].
  *
  * This operator automatically cascades fetches for paginated sources: when the UI
  * accesses a filtered index that's not yet loaded, the operator tracks that access
@@ -363,18 +366,35 @@ fun <T> DeltaList<T>.filterItemsDynamic(
                     emit(Delta(filteredList, Change.Reload))
                     cascadeFetchesIfNeeded(filteredList, sourceItems, loadedCount, leadingUnloaded)
                 } else if (currentSourceItems.size > 0) {
-                    // Predicate changed - re-filter current items and emit Reload
+                    // Predicate changed over the same source: re-filter it and emit the rows that
+                    // left and joined the filter as mutations, so retained rows keep their identity.
                     val (filteredIndices, loadedCount, leadingUnloaded) =
                         buildFilteredIndices(currentSourceItems, event.predicate)
                     val filteredIndicesList = filteredIndices.sorted()
+                    val filteredList = createFilteredList(currentSourceItems, filteredIndicesList, loadedCount, leadingUnloaded)
+
+                    // A leading "load earlier" placeholder isn't modeled by the mutation path, as
+                    // for upstream deltas: fall back to Reload.
+                    val change = if (leadingUnloaded > 0 || previousLeadingUnloaded > 0) {
+                        Change.Reload
+                    } else {
+                        val mutations = adjustMutationsForPlaceholders(
+                            predicateChangeMutations(previousFilteredIndices, filteredIndices),
+                            previousFilteredIndices.size,
+                            previousFilteredSize,
+                            filteredList.size
+                        )
+                        if (mutations.isEmpty()) null else Change.Mutations(mutations)
+                    }
 
                     previousFilteredIndices = filteredIndices
                     currentSourceLoadedCount = loadedCount
                     previousLeadingUnloaded = leadingUnloaded
-
-                    val filteredList = createFilteredList(currentSourceItems, filteredIndicesList, loadedCount, leadingUnloaded)
                     previousFilteredSize = filteredList.size
-                    emit(Delta(filteredList, Change.Reload))
+
+                    if (change != null) {
+                        emit(Delta(filteredList, change))
+                    }
                     cascadeFetchesIfNeeded(filteredList, currentSourceItems, loadedCount, leadingUnloaded)
                 }
             }
@@ -653,6 +673,29 @@ private fun <T> translateMutations(
         }
     }
 
+    return coalesceMutations(result)
+}
+
+/**
+ * The mutations, in running coordinates, that turn the rows of [previous] source indices into the
+ * rows of [current] ones over the same source: walking the source in order, an index that left the
+ * filter is removed where it stood, and one that joined is inserted where it now stands.
+ */
+private fun predicateChangeMutations(previous: Set<Int>, current: Set<Int>): List<Mutation> {
+    val result = mutableListOf<Mutation>()
+    var position = 0
+    for (sourceIndex in (previous + current).sorted()) {
+        val wasIn = sourceIndex in previous
+        val isIn = sourceIndex in current
+        when {
+            wasIn && isIn -> position++
+            wasIn -> result.add(Mutation.Remove(position, 1))
+            else -> {
+                result.add(Mutation.Insert(position, 1))
+                position++
+            }
+        }
+    }
     return coalesceMutations(result)
 }
 

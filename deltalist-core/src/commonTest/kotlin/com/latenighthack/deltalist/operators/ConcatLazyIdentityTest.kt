@@ -57,8 +57,8 @@ class ConcatLazyIdentityTest {
         assertEquals(101, concatSections(source, tail).last().items.size)
     }
 
-    @Test fun binaryConcatReloadsAfterSkippedEmissions() = verifyBackpressure(multiple = false)
-    @Test fun multiConcatReloadsAfterSkippedEmissions() = verifyBackpressure(multiple = true)
+    @Test fun binaryConcatReplacesASourceAfterSkippedEmissions() = verifyBackpressure(multiple = false)
+    @Test fun multiConcatReplacesASourceAfterSkippedEmissions() = verifyBackpressure(multiple = true)
 
     private fun verifyBackpressure(multiple: Boolean) = runTest {
         val begin = CompletableDeferred<Unit>()
@@ -86,6 +86,12 @@ class ConcatLazyIdentityTest {
         job.cancelAndJoin()
         deltas.assertFlatOracle()
         assertEquals(listOf(0, 1, 2, 3, 4), deltas.last().items.softLoadedItems())
-        assertTrue(deltas.drop(1).any { it.change is Change.Reload })
+        // The skipped emissions replace only the source's range; the header keeps its row.
+        assertTrue(deltas.drop(1).none { it.change is Change.Reload })
+        assertTrue(
+            deltas.drop(1).any { delta ->
+                (delta.change as Change.Mutations).operations.firstOrNull() == Mutation.Remove(1, 1)
+            }
+        )
     }
 }

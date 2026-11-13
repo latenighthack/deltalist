@@ -24,6 +24,9 @@ private external object ReactInterop {
  * The proxy delegates every read to the current immutable [SoftList] snapshot. Unloaded positions
  * are array holes: ordinary `map`, `forEach`, and iteration see loaded values without accidentally
  * requesting every page. A virtualizer opts into positional loading with `visibleRange(start, end)`.
+ * `mapSlots(render, placeholder)` renders unloaded positions too, as the iOS and Android bindings
+ * do: each placeholder gets a callback ref, and its slot is requested while that element is in
+ * view, again after each change that leaves it unloaded.
  */
 internal class ReactDeltaListController(
     private var transform: (Any?) -> Any?,
@@ -34,6 +37,13 @@ internal class ReactDeltaListController(
     private val mapped = mutableMapOf<Int, Any?>()
     private val objectKeys: dynamic = js("new WeakMap()")
     private var nextObjectKey = 1
+
+    // One callback ref per unloaded position, so React keeps a placeholder attached while its slot
+    // stays unloaded; the elements they attach, and the positions in view.
+    private val appearRefs = mutableMapOf<Int, dynamic>()
+    private val placeholders = mutableMapOf<Int, dynamic>()
+    private val inView = mutableSetOf<Int>()
+    private var observer: dynamic = null
 
     /** Incremented by every [update]. */
     var revision = 0
@@ -67,6 +77,10 @@ internal class ReactDeltaListController(
         items = next
         keyAt = keys
         revision++
+        appearRefs.keys.filter { it >= next.size }.forEach(appearRefs::remove)
+        // A placeholder still in view whose slot is still unloaded asks again, so loading goes on
+        // while the end of the list shows.
+        inView.toList().forEach(::requestSlot)
     }
 
     /** Where the row at each previous position is in [next], or null once it is gone. */
@@ -82,6 +96,70 @@ internal class ReactDeltaListController(
         mapped.clear()
         items = null
         keyAt = null
+        observer?.disconnect()
+        observer = null
+        placeholders.clear()
+        inView.clear()
+        appearRefs.clear()
+    }
+
+    /** Every position in order: [render] for a loaded one, [placeholder] with its ref otherwise. */
+    internal fun mapSlots(render: (dynamic, Int) -> dynamic, placeholder: (Int, dynamic) -> dynamic): dynamic {
+        val result: dynamic = js("[]")
+        val snapshot = items ?: return result
+        for (index in 0 until snapshot.size) {
+            val value = elementAt(index)
+            result.push(if (value != js("undefined")) render(value, index) else placeholder(index, appearRef(index)))
+        }
+        return result
+    }
+
+    private fun appearRef(index: Int): dynamic = appearRefs.getOrPut(index) {
+        val ref: (dynamic) -> Unit = { element ->
+            if (element == null) {
+                val attached = placeholders.remove(index)
+                if (attached != null) observer?.unobserve(attached)
+                inView.remove(index)
+            } else {
+                placeholders[index] = element
+                observe(element, index)
+            }
+        }
+        ref
+    }
+
+    private fun observe(element: dynamic, index: Int) {
+        if (js("typeof IntersectionObserver === 'undefined'") as Boolean) {
+            // No way to tell what's in view: ask as soon as the placeholder renders.
+            requestSlot(index)
+            return
+        }
+        if (observer == null) {
+            val callback: (dynamic) -> Unit = { entries -> slotsSeen(entries) }
+            observer = js("new IntersectionObserver(callback)")
+        }
+        val current = observer
+        element.dataset.deltaSlot = index.toString()
+        current.observe(element)
+    }
+
+    private fun slotsSeen(entries: dynamic) {
+        val count = entries.length as Int
+        for (position in 0 until count) {
+            val entry = entries[position]
+            val index = (entry.target.dataset.deltaSlot as String).toInt()
+            if (entry.isIntersecting as Boolean) {
+                inView += index
+                requestSlot(index)
+            } else {
+                inView -= index
+            }
+        }
+    }
+
+    private fun requestSlot(index: Int) {
+        val snapshot = items ?: return
+        (snapshot.softGet(index) as? SoftValue.NotLoaded)?.request()
     }
 
     private fun size(): Int = items?.size ?: 0
@@ -209,6 +287,9 @@ internal class ReactDeltaListController(
                     "revision" -> return revision
                     "keyAt" -> return { index: Int -> keyOf(index) }
                     "visibleRange" -> return { start: Int, endInclusive: Int -> visibleRange(start, endInclusive) }
+                    "mapSlots" -> return { render: (dynamic, Int) -> dynamic, placeholder: (Int, dynamic) -> dynamic ->
+                        mapSlots(render, placeholder)
+                    }
                 }
                 name.toIntOrNull()?.let { return elementAt(it) }
             }

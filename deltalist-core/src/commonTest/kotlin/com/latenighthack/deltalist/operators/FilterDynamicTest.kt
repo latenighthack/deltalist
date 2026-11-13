@@ -24,6 +24,7 @@ import com.latenighthack.deltalist.SoftValue
 import com.latenighthack.deltalist.mutableDeltaListOf
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -57,7 +58,7 @@ class FilterDynamicTest {
     }
 
     @Test
-    fun filterDynamic_predicateChangeTriggersReload() = runTest {
+    fun filterDynamic_predicateChangeEmitsMutations() = runTest {
         val source = mutableDeltaListOf(listOf(1, 2, 3, 4, 5, 6))
         val predicateFlow = MutableStateFlow<(Int) -> Boolean> { it % 2 == 0 }
 
@@ -79,7 +80,8 @@ class FilterDynamicTest {
 
         assertEquals(2, results.size)
         assertEquals(listOf(1, 3, 5), results[1].items.toList())
-        assertIs<Change.Reload>(results[1].change)
+        assertIs<Change.Mutations>(results[1].change)
+        results.assertFlatOracle()
     }
 
     @Test
@@ -105,7 +107,8 @@ class FilterDynamicTest {
 
         assertEquals(2, results.size)
         assertEquals(emptyList(), results[1].items.toList())
-        assertIs<Change.Reload>(results[1].change)
+        assertIs<Change.Mutations>(results[1].change)
+        results.assertFlatOracle()
     }
 
     @Test
@@ -131,7 +134,8 @@ class FilterDynamicTest {
 
         assertEquals(2, results.size)
         assertEquals(listOf(1, 2, 3, 4, 5), results[1].items.toList())
-        assertIs<Change.Reload>(results[1].change)
+        assertIs<Change.Mutations>(results[1].change)
+        results.assertFlatOracle()
     }
 
     @Test
@@ -368,7 +372,8 @@ class FilterDynamicTest {
 
         // New: 2 items (5, 10), 20% ratio, estimated 20
         assertEquals(20, results.last().items.size)
-        assertIs<Change.Reload>(results.last().change)
+        assertIs<Change.Mutations>(results.last().change)
+        results.assertSoftOracle()
     }
 
     @Test
@@ -407,7 +412,95 @@ class FilterDynamicTest {
         delay(50)
         job.cancel()
 
-        // The predicate change should have triggered a reload, clearing pending accesses
-        assertIs<Change.Reload>(results.last().change)
+        // The predicate change re-filtered the loaded rows in place, clearing pending accesses
+        assertIs<Change.Mutations>(results.last().change)
+        results.assertSoftOracle()
+    }
+
+    @Test
+    fun filterDynamic_predicateChangeKeepsRetainedRowsInPlace() = runTest {
+        val source = mutableDeltaListOf(listOf(1, 2, 3, 4, 5, 6))
+        val excluded = MutableStateFlow(setOf(2, 5))
+        val filtered = source.filterItemsDynamic(excluded.map { keys -> { item: Int -> item !in keys } })
+
+        val results = mutableListOf<Delta<Int>>()
+        val job = launch { filtered.collect { results.add(it) } }
+
+        delay(50)
+        assertEquals(listOf(1, 3, 4, 6), results.last().items.toList())
+
+        // 2 comes back and 4 leaves: one insert and one remove, never a reload.
+        excluded.value = setOf(4, 5)
+        delay(50)
+        assertEquals(listOf(1, 2, 3, 6), results.last().items.toList())
+        assertEquals(
+            Change.Mutations(listOf(Mutation.Insert(1, 1), Mutation.Remove(3, 1))),
+            results.last().change
+        )
+
+        // Everything leaves, then comes back.
+        excluded.value = setOf(1, 2, 3, 4, 5, 6)
+        delay(50)
+        assertEquals(emptyList(), results.last().items.toList())
+        excluded.value = emptySet()
+        delay(50)
+        job.cancel()
+
+        assertEquals(listOf(1, 2, 3, 4, 5, 6), results.last().items.toList())
+        assertEquals(Change.Mutations(listOf(Mutation.Insert(0, 6))), results.last().change)
+        results.assertFlatOracle()
+    }
+
+    @Test
+    fun filterDynamic_predicateChangeWithNoRowChangeEmitsNothing() = runTest {
+        val source = mutableDeltaListOf(listOf(1, 2, 3))
+        val excluded = MutableStateFlow(setOf(2))
+        val filtered = source.filterItemsDynamic(excluded.map { keys -> { item: Int -> item !in keys } })
+
+        val results = mutableListOf<Delta<Int>>()
+        val job = launch { filtered.collect { results.add(it) } }
+
+        delay(50)
+        // 9 isn't in the source, so no row leaves or joins.
+        excluded.value = setOf(2, 9)
+        delay(50)
+        job.cancel()
+
+        assertEquals(1, results.size)
+        assertEquals(listOf(1, 3), results.last().items.toList())
+    }
+
+    @Test
+    fun filterDynamic_predicateChangeOverPagedSourceKeepsTrailingSlot() = runTest {
+        val source = paginatedDeltaList<Int, Int>(
+            scope = backgroundScope,
+            startToken = 0,
+            fetch = { _, token ->
+                Page(
+                    items = (token * 5 + 1..(token + 1) * 5).toList(),
+                    beforeToken = null,
+                    afterToken = if (token < 3) token + 1 else null,
+                )
+            }
+        )
+        val excluded = MutableStateFlow(setOf(1, 2))
+        val filtered = source.filterItemsDynamic(excluded.map { keys -> { item: Int -> item !in keys } })
+
+        val results = mutableListOf<Delta<Int>>()
+        val job = launch { filtered.collect { results.add(it) } }
+
+        delay(50)
+        assertEquals(listOf(3, 4, 5), results.last().items.softLoadedItems())
+        assertIs<SoftValue.NotLoaded>(results.last().items.softGet(results.last().items.size - 1))
+
+        excluded.value = setOf(4)
+        delay(50)
+        job.cancel()
+
+        val last = results.last()
+        assertIs<Change.Mutations>(last.change)
+        assertEquals(listOf(1, 2, 3, 5), last.items.softLoadedItems())
+        assertIs<SoftValue.NotLoaded>(last.items.softGet(last.items.size - 1))
+        results.assertSoftOracle()
     }
 }

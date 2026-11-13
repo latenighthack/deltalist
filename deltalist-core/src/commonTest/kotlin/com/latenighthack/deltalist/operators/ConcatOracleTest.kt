@@ -60,7 +60,7 @@ class ConcatOracleTest {
     }
 
     @Test
-    fun midStreamReloadFromOneSide() = runTest {
+    fun midStreamReloadFromOneSideReplacesOnlyItsRange() = runTest {
         val first = MutableStateFlow(Delta(listOf(1, 2), Change.Reload))
         val second = MutableStateFlow(Delta(listOf(3, 4), Change.Reload))
 
@@ -70,7 +70,11 @@ class ConcatOracleTest {
         }
 
         deltas.assertFlatOracle()
-        assertTrue(deltas.last().change is Change.Reload, "a source Reload must surface as Reload")
+        assertEquals(
+            Change.Mutations(listOf(Mutation.Remove(3, 2), Mutation.Insert(3, 3))),
+            deltas.last().change,
+            "a source Reload replaces only that source's range",
+        )
         assertEquals(listOf(1, 2, 5, 9, 8, 7), deltas.last().items.softLoadedItems())
     }
 

@@ -73,6 +73,56 @@ class ReactDeltaListControllerTest {
     }
 
     @Test
+    fun mapSlotsRendersPlaceholdersThatAskWhileInView() {
+        val original = js("globalThis.IntersectionObserver")
+        val observers: dynamic = js("({ callback: null, observed: [] })")
+        js("""globalThis.IntersectionObserver = function(callback) {
+            observers.callback = callback;
+            this.observe = function(element) { observers.observed.push(element); };
+            this.unobserve = function() {};
+            this.disconnect = function() {};
+        }""")
+        try {
+            val first = TrackingLazyList(mapOf(0 to "zero"), size = 2)
+            val controller = ReactDeltaListController { it }
+            val proxy = controller.proxy
+            controller.update(first)
+
+            val refs = mutableMapOf<Int, dynamic>()
+            val render: (dynamic, Int) -> dynamic = { value, _ -> "row-$value" }
+            val placeholder: (Int, dynamic) -> dynamic = { index, ref ->
+                refs[index] = ref
+                "slot-$index"
+            }
+            val rendered = proxy.mapSlots(render, placeholder)
+            assertEquals(listOf("row-zero", "slot-1"), arrayFrom(rendered).map { it as String })
+            assertTrue(first.requested.isEmpty(), "rendering a placeholder doesn't ask for its slot")
+
+            val element = js("document.createElement('div')")
+            refs.getValue(1)(element)
+            assertSame(element, observers.observed[0])
+            assertTrue(first.requested.isEmpty(), "attaching doesn't ask until the slot is in view")
+
+            observers.callback(js("[{ target: element, isIntersecting: true }]"))
+            assertEquals(setOf(1), first.requested)
+
+            // A change that leaves the slot unloaded while it's in view asks again.
+            val second = TrackingLazyList(mapOf(0 to "zero"), size = 2)
+            controller.update(second)
+            assertEquals(setOf(1), second.requested)
+
+            // Once the placeholder is gone, nothing asks.
+            refs.getValue(1)(null)
+            val third = TrackingLazyList(mapOf(0 to "zero"), size = 2)
+            controller.update(third)
+            assertTrue(third.requested.isEmpty())
+            controller.dispose()
+        } finally {
+            js("globalThis.IntersectionObserver = original")
+        }
+    }
+
+    @Test
     fun visibleRangeOwnsAcquireReleaseAndRequestsPlaceholders() {
         val list = TrackingLazyList(mapOf(1 to "one", 3 to "three"), size = 4)
         val controller = ReactDeltaListController { it }

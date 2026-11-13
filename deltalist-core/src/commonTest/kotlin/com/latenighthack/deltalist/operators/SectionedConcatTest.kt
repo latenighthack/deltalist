@@ -44,7 +44,7 @@ class SectionedConcatTest {
     }
 
     @Test
-    fun concatSections_sourceReloadSurfacesAsReload() = runTest {
+    fun concatSections_sourceReloadReplacesOnlyItsRange() = runTest {
         val a = MutableStateFlow(Delta(listOf(1, 2), Change.Reload))
         val b = MutableStateFlow(Delta(listOf(3, 4), Change.Reload))
 
@@ -54,7 +54,10 @@ class SectionedConcatTest {
         }
 
         deltas.assertFlatOracle()
-        assertTrue(deltas.last().change is Change.Reload)
+        assertEquals(
+            Change.Mutations(listOf(Mutation.Remove(3, 2), Mutation.Insert(3, 1))),
+            deltas.last().change,
+        )
         assertEquals(listOf(1, 2, 8, 0), deltas.last().items.softLoadedItems())
     }
 
